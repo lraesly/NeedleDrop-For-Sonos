@@ -60,11 +60,19 @@ final class SonosEventHandler: ObservableObject {
 
         log.info("Subscribing to AVTransport events on \(zoneName) (\(speakerIP))")
 
-        // Find AVTransport1 service
-        guard let service = device.services.first(where: {
-            $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
-        }) as? AVTransport1Service else {
-            log.error("No AVTransport1 service found on \(zoneName)")
+        // Services may not be loaded yet after SSDP discovery — retry with delay
+        var service: AVTransport1Service?
+        for attempt in 1...10 {
+            service = device.services.first(where: {
+                $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
+            }) as? AVTransport1Service
+            if service != nil { break }
+            log.info("AVTransport1 not yet available on \(zoneName) (attempt \(attempt)/10), waiting...")
+            try? await Task.sleep(for: .seconds(1))
+        }
+
+        guard let service else {
+            log.error("No AVTransport1 service found on \(zoneName) after retries")
             return
         }
 

@@ -10,8 +10,7 @@ settings:
   SWIFT_STRICT_CONCURRENCY: complete
 packages:
   SwiftUPnP:
-    url: https://github.com/katoemba/SwiftUPnP
-    branch: main
+    path: LocalPackages/SwiftUPnP
 targets:
   NeedleDrop:
     type: application

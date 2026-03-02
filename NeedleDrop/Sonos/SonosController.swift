@@ -13,25 +13,43 @@ final class SonosController {
 
     // MARK: - Service Lookup
 
-    /// Find AVTransport1Service on a UPnP device.
-    private func avTransport(for device: UPnPDevice) -> AVTransport1Service? {
-        device.services.first(where: {
-            $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
-        }) as? AVTransport1Service
+    /// Find AVTransport1Service on a UPnP device, waiting for services to load if needed.
+    private func avTransport(for device: UPnPDevice) async -> AVTransport1Service? {
+        for attempt in 1...5 {
+            if let service = device.services.first(where: {
+                $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
+            }) as? AVTransport1Service {
+                return service
+            }
+            if attempt < 5 {
+                log.debug("AVTransport not ready on \(device.uuid), retry \(attempt)/5")
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        return nil
     }
 
-    /// Find RenderingControl1Service on a UPnP device.
-    private func renderingControl(for device: UPnPDevice) -> RenderingControl1Service? {
-        device.services.first(where: {
-            $0.serviceType == "urn:schemas-upnp-org:service:RenderingControl:1"
-        }) as? RenderingControl1Service
+    /// Find RenderingControl1Service on a UPnP device, waiting for services to load if needed.
+    private func renderingControl(for device: UPnPDevice) async -> RenderingControl1Service? {
+        for attempt in 1...5 {
+            if let service = device.services.first(where: {
+                $0.serviceType == "urn:schemas-upnp-org:service:RenderingControl:1"
+            }) as? RenderingControl1Service {
+                return service
+            }
+            if attempt < 5 {
+                log.debug("RenderingControl not ready on \(device.uuid), retry \(attempt)/5")
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        return nil
     }
 
     // MARK: - Transport Controls
 
     /// Start or resume playback.
     func play(device: UPnPDevice) async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }
@@ -45,7 +63,7 @@ final class SonosController {
 
     /// Pause playback.
     func pause(device: UPnPDevice) async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }
@@ -59,7 +77,7 @@ final class SonosController {
 
     /// Stop playback.
     func stop(device: UPnPDevice) async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }
@@ -73,7 +91,7 @@ final class SonosController {
 
     /// Skip to the next track.
     func next(device: UPnPDevice) async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }
@@ -87,7 +105,7 @@ final class SonosController {
 
     /// Skip to the previous track.
     func previous(device: UPnPDevice) async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }
@@ -103,7 +121,7 @@ final class SonosController {
 
     /// Get the current volume level (0–100).
     func getVolume(device: UPnPDevice) async -> Int? {
-        guard let service = renderingControl(for: device) else {
+        guard let service = await renderingControl(for: device) else {
             log.error("No RenderingControl service on device \(device.uuid)")
             return nil
         }
@@ -118,7 +136,7 @@ final class SonosController {
 
     /// Set the volume level (0–100).
     func setVolume(device: UPnPDevice, level: Int) async {
-        guard let service = renderingControl(for: device) else {
+        guard let service = await renderingControl(for: device) else {
             log.error("No RenderingControl service on device \(device.uuid)")
             return
         }
@@ -140,7 +158,7 @@ final class SonosController {
     ///   - uri: The Sonos transport URI (e.g. `x-sonosapi-radio:...`, `x-rincon-cpcontainer:...`).
     ///   - metadata: DIDL-Lite XML metadata for the URI. Pass empty string if none.
     func playURI(device: UPnPDevice, uri: String, metadata: String = "") async {
-        guard let service = avTransport(for: device) else {
+        guard let service = await avTransport(for: device) else {
             log.error("No AVTransport service on device \(device.uuid)")
             return
         }

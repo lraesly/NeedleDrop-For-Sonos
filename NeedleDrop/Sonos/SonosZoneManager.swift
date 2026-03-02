@@ -62,10 +62,18 @@ final class SonosZoneManager {
 
     /// Fetch Sonos favorites via ContentDirectory Browse (ObjectID=FV:2).
     func getFavorites(device: UPnPDevice) async -> [FavoriteItem] {
-        guard let service = device.services.first(where: {
-            $0.serviceType == "urn:schemas-upnp-org:service:ContentDirectory:1"
-        }) as? ContentDirectory1Service else {
-            log.error("No ContentDirectory service on device \(device.uuid)")
+        // Services may not be loaded yet — retry with delay
+        var service: ContentDirectory1Service?
+        for attempt in 1...10 {
+            service = device.services.first(where: {
+                $0.serviceType == "urn:schemas-upnp-org:service:ContentDirectory:1"
+            }) as? ContentDirectory1Service
+            if service != nil { break }
+            log.info("ContentDirectory not yet available (attempt \(attempt)/10), waiting...")
+            try? await Task.sleep(for: .seconds(1))
+        }
+        guard let service else {
+            log.error("No ContentDirectory service on device \(device.uuid) after retries")
             return []
         }
 
@@ -124,10 +132,19 @@ final class SonosZoneManager {
     /// Sets the speaker's AVTransport URI to `x-rincon:{coordinatorUUID}`,
     /// which makes it play audio from the coordinator's group.
     func joinSpeaker(speaker: UPnPDevice, toCoordinator coordinator: SonosDevice) async {
-        guard let service = speaker.services.first(where: {
-            $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
-        }) as? AVTransport1Service else {
-            log.error("No AVTransport service on speaker")
+        // Services may not be loaded yet — retry with delay
+        var service: AVTransport1Service?
+        for attempt in 1...5 {
+            service = speaker.services.first(where: {
+                $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
+            }) as? AVTransport1Service
+            if service != nil { break }
+            if attempt < 5 {
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        guard let service else {
+            log.error("No AVTransport service on speaker after retries")
             return
         }
 

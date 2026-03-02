@@ -10,6 +10,8 @@ struct ScrobblerConfig: Codable, Equatable, Identifiable {
     var id: String { "\(host):\(port)" }
 
     var baseURL: URL {
-        URL(string: "http://\(host):\(port)")!
+        // Wrap IPv6 addresses in brackets for valid URL construction
+        let hostPart = host.contains(":") ? "[\(host)]" : host
+        return URL(string: "http://\(hostPart):\(port)")!
     }
 }

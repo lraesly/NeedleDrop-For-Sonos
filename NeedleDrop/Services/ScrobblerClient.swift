@@ -65,29 +65,41 @@ final class ScrobblerClient: ObservableObject {
     private func resolveService(_ result: NWBrowser.Result) {
         let connection = NWConnection(to: result.endpoint, using: .tcp)
         connection.stateUpdateHandler = { [weak self] state in
-            if case .ready = state {
+            switch state {
+            case .ready:
                 if let endpoint = connection.currentPath?.remoteEndpoint,
                    case let .hostPort(host, port) = endpoint {
-                    let hostStr = "\(host)"
+                    // Clean the host string — remove interface suffix (e.g., "%en0")
+                    // and handle IPv6 addresses properly
+                    var hostStr = "\(host)"
+                    if let percentIndex = hostStr.firstIndex(of: "%") {
+                        hostStr = String(hostStr[..<percentIndex])
+                    }
                     let portNum = Int(port.rawValue)
                     Task { @MainActor in
-                        // Extract service name from the endpoint
                         var name = "Scrobbler"
                         if case let .service(serviceName, _, _, _) = result.endpoint {
                             name = serviceName
                         }
-                        self?.config = ScrobblerConfig(
+                        let config = ScrobblerConfig(
                             host: hostStr,
                             port: portNum,
                             token: "",
                             name: name
                         )
+                        self?.config = config
+                        self?.persistConfig()
                         self?.isSearching = false
                         self?.stopDiscovery()
                         log.info("Resolved scrobbler: \(name) at \(hostStr):\(portNum)")
                     }
                 }
                 connection.cancel()
+            case .failed(let error):
+                log.error("Service resolution failed: \(error.localizedDescription)")
+                connection.cancel()
+            default:
+                break
             }
         }
         connection.start(queue: .global(qos: .userInitiated))
@@ -211,7 +223,9 @@ final class ScrobblerClient: ObservableObject {
     private func request(method: String, path: String, body: Data?) async throws -> Data {
         guard let config else { throw ScrobblerError.notConnected }
 
-        let url = config.baseURL.appendingPathComponent(path)
+        guard let url = URL(string: "\(config.baseURL.absoluteString)\(path)") else {
+            throw ScrobblerError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 10
