@@ -17,6 +17,11 @@ final class SonosDiscoveryService: ObservableObject {
     @Published var speakers: [SonosDevice] = []
     @Published var isDiscovering = false
 
+    /// UPnP device objects from SSDP discovery, keyed by UUID.
+    /// These have loaded services (AVTransport, RenderingControl, etc.)
+    /// needed for event subscriptions and SOAP control.
+    private var upnpDevices: [String: UPnPDevice] = [:]
+
     private let speakerStore: SpeakerStore
     private var cancellables = Set<AnyCancellable>()
     private var pathMonitor: NWPathMonitor?
@@ -61,6 +66,12 @@ final class SonosDiscoveryService: ObservableObject {
     func stopDiscovery() {
         UPnPRegistry.shared.stopDiscovery()
         isDiscovering = false
+    }
+
+    /// Get the UPnP device for a speaker UUID (needed for event subscriptions).
+    /// Returns nil if the speaker was only found via cached IP probe (no SSDP yet).
+    func upnpDevice(for uuid: String) -> UPnPDevice? {
+        upnpDevices[uuid]
     }
 
     // MARK: - Cached IP Fast Path
@@ -150,6 +161,7 @@ final class SonosDiscoveryService: ObservableObject {
         )
 
         log.info("SSDP discovered: \(roomName) at \(host)")
+        upnpDevices[uuid] = device
         addOrUpdateSpeaker(sonosDevice)
     }
 
@@ -175,6 +187,7 @@ final class SonosDiscoveryService: ObservableObject {
             log.info("Network change detected — re-discovering speakers")
             Task { @MainActor [weak self] in
                 self?.speakers.removeAll()
+                self?.upnpDevices.removeAll()
                 self?.startDiscovery()
             }
         }
@@ -191,6 +204,7 @@ final class SonosDiscoveryService: ObservableObject {
         ) { [weak self] _ in
             log.info("System wake — re-discovering speakers")
             self?.speakers.removeAll()
+            self?.upnpDevices.removeAll()
             self?.startDiscovery()
         }
         workspaceObservers.append(observer)

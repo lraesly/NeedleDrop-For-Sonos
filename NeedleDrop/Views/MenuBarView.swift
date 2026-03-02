@@ -21,18 +21,9 @@ struct MenuBarView: View {
             if appState.speakers.isEmpty {
                 SonosSetupView()
             } else {
-                VStack(spacing: 8) {
-                    // Now playing placeholder (Phase 2)
-                    VStack(spacing: 4) {
-                        Image(systemName: "music.note")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                        Text("Now playing will appear here")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 100)
-                    .padding()
+                VStack(spacing: 0) {
+                    // Now playing
+                    NowPlayingView()
 
                     Divider()
 
