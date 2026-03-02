@@ -171,13 +171,12 @@ public class UPnPRegistry {
                 return
             }
             
-            if let deviceServices = device.deviceDefinition?.device.serviceList?.service {
-                for deviceService in deviceServices {
-                    guard let service = typedService(device: device, serviceUrn: deviceService.serviceType) else { continue }
-                    
-                    await service.loadScdp()
-                    device.add(service)
-                }
+            let deviceServices = device.deviceDefinition?.device.allServices ?? []
+            for deviceService in deviceServices {
+                guard let service = typedService(device: device, serviceUrn: deviceService.serviceType) else { continue }
+
+                await service.loadScdp()
+                device.add(service)
             }
             
             device.servicesLoaded = true
@@ -197,8 +196,8 @@ public class UPnPRegistry {
     }
     
     static func typedService(device: UPnPDevice, serviceUrn: String, eventPublisher: AnyPublisher<(String, Data), Never>? = nil, eventCallbackUrl: URL? = nil) -> UPnPService? {
-        guard let deviceServices = device.deviceDefinition?.device.serviceList?.service,
-              let deviceService = deviceServices.first(where: { $0.serviceType == serviceUrn }),
+        let allDeviceServices = device.deviceDefinition?.device.allServices ?? []
+        guard let deviceService = allDeviceServices.first(where: { $0.serviceType == serviceUrn }),
               let scheme = device.url.scheme,
               let host = device.url.host,
               let port = device.url.port,

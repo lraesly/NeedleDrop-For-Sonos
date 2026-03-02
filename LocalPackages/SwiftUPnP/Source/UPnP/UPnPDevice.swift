@@ -148,16 +148,15 @@ public class UPnPDevice: Equatable, Identifiable, Hashable {
             return false
         }
             
-        if let deviceServices = deviceDefinition?.device.serviceList?.service {
-            for deviceService in deviceServices {
-                guard let service = UPnPRegistry.typedService(device: self,
-                                                              serviceUrn: deviceService.serviceType,
-                                                              eventPublisher: registry?.eventPublisher,
-                                                              eventCallbackUrl: registry?.eventCallbackUrl) else { continue }
-                
-                await service.loadScdp()
-                await add(service)
-            }
+        let deviceServices = deviceDefinition?.device.allServices ?? []
+        for deviceService in deviceServices {
+            guard let service = UPnPRegistry.typedService(device: self,
+                                                          serviceUrn: deviceService.serviceType,
+                                                          eventPublisher: registry?.eventPublisher,
+                                                          eventCallbackUrl: registry?.eventCallbackUrl) else { continue }
+
+            await service.loadScdp()
+            await add(service)
         }
         
         return true

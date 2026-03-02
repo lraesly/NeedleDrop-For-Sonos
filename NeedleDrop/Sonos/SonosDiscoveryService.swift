@@ -180,15 +180,27 @@ final class SonosDiscoveryService: ObservableObject {
 
     // MARK: - Network & Wake Monitoring
 
+    private var lastNetworkPath: NWPath?
+
     private func setupNetworkMonitor() {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
-            log.info("Network change detected — re-discovering speakers")
             Task { @MainActor [weak self] in
-                self?.speakers.removeAll()
-                self?.upnpDevices.removeAll()
-                self?.startDiscovery()
+                guard let self else { return }
+                // Skip the initial firing — NWPathMonitor always fires once immediately.
+                // Only act on actual network changes after the first path is stored.
+                if let lastPath = self.lastNetworkPath {
+                    // Only re-discover if the path actually changed
+                    // (e.g., switched Wi-Fi networks, IP changed)
+                    if lastPath != path {
+                        log.info("Network change detected — re-discovering speakers")
+                        self.speakers.removeAll()
+                        self.upnpDevices.removeAll()
+                        self.startDiscovery()
+                    }
+                }
+                self.lastNetworkPath = path
             }
         }
         monitor.start(queue: .global(qos: .utility))

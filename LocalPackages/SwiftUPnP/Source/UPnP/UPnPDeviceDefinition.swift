@@ -51,8 +51,24 @@ public struct Device: Decodable {
 
     public let iconList: IconList?
     public let serviceList: ServiceList?
-    
+    public let deviceList: DeviceList?
+
     public let presentationURL: String?
+
+    /// All services from this device and any embedded devices (recursive).
+    public var allServices: [Service] {
+        var result = serviceList?.service ?? []
+        if let embedded = deviceList?.device {
+            for child in embedded {
+                result.append(contentsOf: child.allServices)
+            }
+        }
+        return result
+    }
+}
+
+public struct DeviceList: Decodable {
+    public let device: [Device]
 }
 
 public struct IconList: Decodable {
