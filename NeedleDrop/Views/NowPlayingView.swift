@@ -101,9 +101,33 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             .help("Next")
+
+            // Heart / save to library
+            if appState.canSaveToLibrary {
+                Spacer()
+                heartButton
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Heart Button
+
+    private var heartButton: some View {
+        let isSaved = appState.lastSaveResult?.trackId == nowPlaying.track?.id
+            && appState.lastSaveResult?.anySucceeded == true
+
+        return Button {
+            appState.saveToLibrary()
+        } label: {
+            Image(systemName: isSaved ? "heart.fill" : "heart")
+                .font(.body)
+                .foregroundColor(isSaved ? .red : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Save to library")
+        .disabled(isSaved)
     }
 
     // MARK: - Volume Slider

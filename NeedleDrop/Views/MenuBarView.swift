@@ -44,6 +44,21 @@ struct MenuBarView: View {
                 }
             }
 
+            // Library services (collapsible)
+            if !appState.speakers.isEmpty {
+                Divider()
+
+                DisclosureGroup {
+                    LibraryServicesView()
+                } label: {
+                    Text("Music Services")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            }
+
             Divider()
 
             // Footer

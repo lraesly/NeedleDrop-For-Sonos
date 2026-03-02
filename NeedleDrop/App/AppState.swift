@@ -34,6 +34,12 @@ final class AppState: ObservableObject {
     let presetStore = PresetStore()
     @Published var presetNav: PresetNav?
 
+    // MARK: - Library
+
+    let spotifyService = SpotifyService()
+    let appleMusicService = AppleMusicService()
+    @Published var lastSaveResult: LibrarySaveDetail?
+
     // MARK: - Menu Bar
 
     var menuBarIcon: String {
@@ -286,6 +292,48 @@ final class AppState: ObservableObject {
 
             // 6. Refresh zones to reflect new grouping
             await refreshZones()
+        }
+    }
+
+    // MARK: - Library Saves
+
+    /// Whether the heart/save button should be shown (at least one service connected).
+    var canSaveToLibrary: Bool {
+        spotifyService.isConnected || appleMusicService.isConnected
+    }
+
+    /// Save the current track to connected music libraries (Spotify + Apple Music).
+    func saveToLibrary() {
+        guard let track = nowPlaying.track else { return }
+        log.info("Saving to library: \(track.artist) – \(track.title)")
+
+        Task {
+            var results: [ServiceSaveResult] = []
+
+            // Run both saves concurrently
+            async let spotifyResult: ServiceSaveResult? = spotifyService.isConnected
+                ? spotifyService.searchAndSave(title: track.title, artist: track.artist)
+                : nil
+
+            async let appleMusicResult: ServiceSaveResult? = appleMusicService.isConnected
+                ? appleMusicService.searchAndSave(title: track.title, artist: track.artist)
+                : nil
+
+            if let result = await spotifyResult { results.append(result) }
+            if let result = await appleMusicResult { results.append(result) }
+
+            self.lastSaveResult = LibrarySaveDetail(
+                trackId: track.id,
+                results: results
+            )
+
+            // Clear result after a few seconds
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                if self.lastSaveResult?.trackId == track.id {
+                    self.lastSaveResult = nil
+                }
+            }
         }
     }
 }
