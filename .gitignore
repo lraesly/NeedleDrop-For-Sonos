@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Config with secrets
+config.toml
+
+# Claude Code
+.claude/
+
+# IDE
+.idea/
+.vscode/
+
+# SPM
+.build/
