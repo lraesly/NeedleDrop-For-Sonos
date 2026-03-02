@@ -29,6 +29,11 @@ final class AppState: ObservableObject {
     @Published var volume: Int = 0
     @Published var favorites: [FavoriteItem] = []
 
+    // MARK: - Presets
+
+    let presetStore = PresetStore()
+    @Published var presetNav: PresetNav?
+
     // MARK: - Menu Bar
 
     var menuBarIcon: String {
@@ -238,4 +243,57 @@ final class AppState: ObservableObject {
             }
         }
     }
+
+    // MARK: - Presets
+
+    /// Activate a preset: group rooms, set volume, play favorite.
+    func activatePreset(_ preset: Preset) {
+        log.info("Activating preset: \(preset.name)")
+        Task {
+            // 1. Find the coordinator by room name
+            guard let coordinatorSpeaker = speakers.first(where: { $0.roomName == preset.coordinatorRoom }) else {
+                log.error("Coordinator room '\(preset.coordinatorRoom)' not found")
+                return
+            }
+
+            // 2. Group/ungroup rooms as needed
+            for roomName in preset.rooms {
+                if roomName == preset.coordinatorRoom { continue }
+                if let speaker = speakers.first(where: { $0.roomName == roomName }),
+                   let upnpDevice = discoveryService.upnpDevice(for: speaker.uuid) {
+                    await zoneManager.joinSpeaker(speaker: upnpDevice, toCoordinator: coordinatorSpeaker)
+                }
+            }
+
+            // 3. Set volume before playing (so it doesn't blast at previous level)
+            if let vol = preset.volume,
+               let device = discoveryService.upnpDevice(for: coordinatorSpeaker.uuid) {
+                await controller.setVolume(device: device, level: vol)
+                self.volume = vol
+            }
+
+            // 4. Play the favorite
+            if let device = discoveryService.upnpDevice(for: coordinatorSpeaker.uuid) {
+                await controller.playURI(
+                    device: device,
+                    uri: preset.favorite.uri,
+                    metadata: preset.favorite.meta
+                )
+            }
+
+            // 5. Switch active zone to the preset's coordinator
+            selectZone(coordinatorSpeaker.uuid)
+
+            // 6. Refresh zones to reflect new grouping
+            await refreshZones()
+        }
+    }
+}
+
+/// Navigation state for preset editing views.
+enum PresetNav: Equatable {
+    case list
+    case create
+    case edit(Preset)
+    case createFromCurrent(rooms: [String], coordinatorRoom: String, sourceUri: String?)
 }

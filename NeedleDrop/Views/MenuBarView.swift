@@ -25,12 +25,17 @@ struct MenuBarView: View {
                     // Now playing + controls
                     NowPlayingView()
 
-                    // Favorites
-                    if !appState.favorites.isEmpty {
+                    // Favorites + Presets
+                    if !appState.favorites.isEmpty || !appState.presetStore.presets.isEmpty {
                         Divider()
 
                         HStack {
-                            FavoritesView()
+                            if !appState.favorites.isEmpty {
+                                FavoritesView()
+                            }
+                            if !appState.presetStore.presets.isEmpty || !appState.favorites.isEmpty {
+                                PresetsView()
+                            }
                             Spacer()
                         }
                         .padding(.horizontal, 12)
@@ -56,6 +61,37 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+        }
+        .popover(isPresented: Binding(
+            get: { appState.presetNav != nil },
+            set: { if !$0 { appState.presetNav = nil } }
+        )) {
+            presetPopoverContent
+        }
+    }
+
+    @ViewBuilder
+    private var presetPopoverContent: some View {
+        switch appState.presetNav {
+        case .list:
+            PresetListView()
+                .environmentObject(appState)
+        case .create:
+            PresetEditorView(mode: .create)
+                .environmentObject(appState)
+        case .edit(let preset):
+            PresetEditorView(mode: .edit(preset))
+                .environmentObject(appState)
+        case .createFromCurrent(let rooms, let coordinator, let sourceUri):
+            PresetEditorView(
+                mode: .create,
+                prefillRooms: rooms,
+                prefillCoordinator: coordinator,
+                prefillSourceUri: sourceUri
+            )
+            .environmentObject(appState)
+        case nil:
+            EmptyView()
         }
     }
 }
