@@ -45,6 +45,21 @@ final class AppState: ObservableObject {
     let scrobblerClient = ScrobblerClient()
     let scrobbleTracker = ScrobbleTracker()
 
+    // MARK: - Mini Player
+
+    @Published var isMiniPlayerVisible = false
+    @Published var isMiniPlayerActive = false
+    @Published var isMiniPlayerTransparent = true
+    @Published var miniPlayerFlashCount = 0
+
+    let miniPlayerWindow = MiniPlayerWindow()
+
+    // MARK: - Banner
+
+    @Published var isBannerEnabled = true
+    let bannerWindow = BannerWindow()
+    private var bannerDismissTask: Task<Void, Never>?
+
     // MARK: - Menu Bar
 
     var menuBarIcon: String {
@@ -61,12 +76,101 @@ final class AppState: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - App Nap Prevention
+
+    /// Activity token that prevents App Nap from suspending the process.
+    /// UPnP event subscriptions and the HTTP callback server need to stay alive.
+    nonisolated(unsafe) private var appNapActivity: NSObjectProtocol?
+
+    // MARK: - Sleep/Wake
+
+    private nonisolated(unsafe) var sleepObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var wakeObserver: NSObjectProtocol?
+
+    /// Volume level saved before mute, used for unmuting.
+    private var preMuteVolume: Int?
+
     // MARK: - Init
 
     init() {
         setupBindings()
         startDiscovery()
         scrobblerClient.loadPersistedConfig()
+        preventAppNap()
+        setupSleepWakeObservers()
+    }
+
+    deinit {
+        if let activity = appNapActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+        }
+        if let o = sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(o)
+        }
+        if let o = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(o)
+        }
+    }
+
+    // MARK: - App Nap Prevention
+
+    private func preventAppNap() {
+        appNapActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled],
+            reason: "UPnP event listener and HTTP callback server"
+        )
+        log.info("App Nap prevention enabled")
+    }
+
+    // MARK: - Sleep/Wake
+
+    private func setupSleepWakeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+
+        sleepObserver = center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            log.info("System sleep — unsubscribing from events")
+            guard let self else { return }
+            Task { @MainActor in
+                await self.eventHandler.unsubscribe()
+            }
+        }
+
+        wakeObserver = center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            log.info("System wake — re-subscribing to events")
+            guard let self else { return }
+            Task { @MainActor in
+                // Re-subscribe to the active zone's events after a brief delay
+                // to let the network come back up
+                try? await Task.sleep(for: .seconds(2))
+                self.resubscribeToActiveZone()
+            }
+        }
+    }
+
+    /// Re-subscribe to AVTransport events for the active zone.
+    /// Called after sleep/wake or network change.
+    private func resubscribeToActiveZone() {
+        guard let zone = activeZone,
+              let upnpDevice = discoveryService.upnpDevice(for: zone.coordinator.uuid) else {
+            return
+        }
+
+        Task {
+            await eventHandler.subscribe(
+                to: upnpDevice,
+                speakerIP: zone.coordinator.ip,
+                zoneName: zone.roomName
+            )
+            refreshVolume()
+        }
     }
 
     // MARK: - Discovery
@@ -93,20 +197,77 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Mirror event handler's now-playing state to app state
-        // and feed scrobble tracker
+        // Mirror event handler's now-playing state to app state,
+        // feed scrobble tracker, and trigger banner/mini-player updates
         eventHandler.$nowPlaying
             .receive(on: DispatchQueue.main)
             .sink { [weak self] nowPlaying in
                 guard let self else { return }
+                let oldTrackId = self.nowPlaying.track?.id
                 self.nowPlaying = nowPlaying
+
+                // Feed scrobble tracker
                 self.scrobbleTracker.update(
                     trackId: nowPlaying.track?.id,
                     transportState: nowPlaying.transportState,
                     durationSeconds: nowPlaying.track?.durationSeconds ?? 0
                 )
+
+                // Detect track change for banner + mini player flash
+                if let track = nowPlaying.track,
+                   !track.isTVAudio,
+                   track.id != oldTrackId {
+                    self.onTrackChange(track: track)
+                }
+
+                // Keep mini player title in sync
+                self.miniPlayerWindow.updateTitle(for: nowPlaying.track)
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Track Change Handling
+
+    /// Called when a new track starts playing. Shows banner and flashes mini player.
+    private func onTrackChange(track: TrackInfo) {
+        log.info("Track change: \(track.artist) — \(track.title)")
+
+        // Flash the mini player (triggers song-change reveal in transparent mode)
+        miniPlayerFlashCount += 1
+
+        // Show banner notification if enabled
+        if isBannerEnabled {
+            showBanner(track: track)
+        }
+    }
+
+    // MARK: - Banner
+
+    private func showBanner(track: TrackInfo) {
+        // Cancel any pending dismiss
+        bannerDismissTask?.cancel()
+
+        bannerWindow.showBanner(track: track, appState: self)
+
+        // Auto-dismiss after 4 seconds
+        bannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            bannerWindow.dismissBanner()
+        }
+    }
+
+    // MARK: - Mini Player
+
+    func toggleMiniPlayer() {
+        if isMiniPlayerVisible {
+            miniPlayerWindow.dismiss()
+            isMiniPlayerVisible = false
+            isMiniPlayerActive = false
+        } else {
+            miniPlayerWindow.show(appState: self)
+            isMiniPlayerVisible = true
+        }
     }
 
     // MARK: - Connection Setup
@@ -207,6 +368,19 @@ final class AppState: ObservableObject {
         volume = level
         Task {
             await controller.setVolume(device: device, level: level)
+        }
+    }
+
+    /// Toggle mute: if volume > 0, store it and set to 0. Otherwise restore.
+    func toggleMute() {
+        if volume > 0 {
+            preMuteVolume = volume
+            setVolume(0)
+        } else if let saved = preMuteVolume {
+            setVolume(saved)
+            preMuteVolume = nil
+        } else {
+            setVolume(20) // reasonable default
         }
     }
 

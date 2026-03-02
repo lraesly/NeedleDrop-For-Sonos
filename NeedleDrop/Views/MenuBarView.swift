@@ -77,12 +77,51 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Footer
-            HStack {
+            // Footer: mini player toggle, banner toggle, quit
+            HStack(spacing: 12) {
+                if !appState.speakers.isEmpty {
+                    Button {
+                        appState.toggleMiniPlayer()
+                    } label: {
+                        Image(systemName: appState.isMiniPlayerVisible
+                              ? "pip.fill" : "pip")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help(appState.isMiniPlayerVisible ? "Hide Mini Player" : "Show Mini Player")
+
+                    Button {
+                        appState.isBannerEnabled.toggle()
+                    } label: {
+                        Image(systemName: appState.isBannerEnabled
+                              ? "bell.fill" : "bell.slash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help(appState.isBannerEnabled ? "Disable Track Banners" : "Enable Track Banners")
+
+                    if appState.isMiniPlayerVisible {
+                        Button {
+                            appState.isMiniPlayerTransparent.toggle()
+                        } label: {
+                            Image(systemName: appState.isMiniPlayerTransparent
+                                  ? "sun.max" : "sun.max.fill")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                        .help(appState.isMiniPlayerTransparent ? "Solid Mode" : "Transparent Mode")
+                    }
+                }
+
+                Spacer()
+
                 Text("NeedleDrop v2")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Spacer()
+
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
                 }
