@@ -41,6 +41,7 @@ final class AppState: ObservableObject {
     lazy var discoveryService = SonosDiscoveryService(speakerStore: speakerStore)
     let eventHandler = SonosEventHandler()
     let controller = SonosController()
+    let zoneManager = SonosZoneManager()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -69,8 +70,8 @@ final class AppState: ObservableObject {
                     self.connectionState = .connected
                     log.info("Connected — found \(speakers.count) speaker(s)")
 
-                    // Auto-subscribe to first speaker's events if not already subscribed
-                    self.autoSubscribeToEvents()
+                    // Load zones, favorites, and subscribe to events
+                    self.onConnected()
                 }
             }
             .store(in: &cancellables)
@@ -84,32 +85,68 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // MARK: - Event Subscription
+    // MARK: - Connection Setup
 
-    /// Auto-subscribe to the first available speaker's AVTransport events.
-    /// In Phase 4 this will become zone-aware (subscribe to coordinator only).
-    private func autoSubscribeToEvents() {
-        // Find a speaker that has a UPnP device with loaded services
-        guard let speaker = speakers.first,
-              let upnpDevice = discoveryService.upnpDevice(for: speaker.uuid) else {
-            log.debug("No UPnP device available yet for event subscription")
-            return
-        }
+    /// Called once when speakers are first discovered. Loads zone topology,
+    /// favorites, and subscribes to the active zone's events.
+    private func onConnected() {
+        guard let firstSpeaker = speakers.first else { return }
 
         Task {
-            await eventHandler.subscribe(
-                to: upnpDevice,
-                speakerIP: speaker.ip,
-                zoneName: speaker.roomName
-            )
+            // Fetch zone topology
+            let groups = await zoneManager.getZoneGroups(speakerIP: firstSpeaker.ip)
+            self.zones = groups
+
+            // Auto-select first zone if none selected
+            if selectedZone == nil, let first = groups.first {
+                selectZone(first.coordinator.uuid)
+            }
+
+            // Fetch favorites from the coordinator
+            if let device = activeUPnPDevice {
+                let favs = await zoneManager.getFavorites(device: device)
+                self.favorites = favs
+            }
+        }
+    }
+
+    // MARK: - Zone Selection
+
+    /// The currently selected zone group.
+    var activeZone: SonosZoneGroup? {
+        zones.first(where: { $0.coordinator.uuid == selectedZone })
+    }
+
+    /// Select a zone to control. Subscribes to its coordinator's events.
+    func selectZone(_ coordinatorUUID: String) {
+        guard coordinatorUUID != selectedZone else { return }
+        selectedZone = coordinatorUUID
+
+        guard let zone = activeZone else { return }
+        log.info("Selected zone: \(zone.roomName)")
+
+        // Subscribe to the coordinator's AVTransport events
+        if let upnpDevice = discoveryService.upnpDevice(for: zone.coordinator.uuid) {
+            Task {
+                await eventHandler.subscribe(
+                    to: upnpDevice,
+                    speakerIP: zone.coordinator.ip,
+                    zoneName: zone.roomName
+                )
+                refreshVolume()
+            }
         }
     }
 
     // MARK: - Active Device
 
-    /// The UPnP device we're currently subscribed to (the coordinator).
+    /// The UPnP device for the active zone's coordinator.
     /// All control commands target this device.
     private var activeUPnPDevice: UPnPDevice? {
+        if let zone = activeZone {
+            return discoveryService.upnpDevice(for: zone.coordinator.uuid)
+        }
+        // Fallback to first speaker if no zone selected yet
         guard let speaker = speakers.first else { return nil }
         return discoveryService.upnpDevice(for: speaker.uuid)
     }
@@ -159,6 +196,35 @@ final class AppState: ObservableObject {
                 metadata: favorite.meta
             )
         }
+    }
+
+    // MARK: - Speaker Grouping
+
+    /// Join a speaker to the active zone's coordinator.
+    func joinSpeaker(_ speakerUUID: String) {
+        guard let zone = activeZone,
+              let speakerDevice = discoveryService.upnpDevice(for: speakerUUID) else { return }
+        Task {
+            await zoneManager.joinSpeaker(speaker: speakerDevice, toCoordinator: zone.coordinator)
+            // Refresh zones after grouping change
+            await refreshZones()
+        }
+    }
+
+    /// Remove a speaker from its group.
+    func unjoinSpeaker(_ speaker: SonosDevice) {
+        Task {
+            await zoneManager.unjoinSpeaker(speakerIP: speaker.ip)
+            // Refresh zones after grouping change
+            await refreshZones()
+        }
+    }
+
+    /// Refresh zone topology from the network.
+    func refreshZones() async {
+        guard let firstSpeaker = speakers.first else { return }
+        let groups = await zoneManager.getZoneGroups(speakerIP: firstSpeaker.ip)
+        self.zones = groups
     }
 
     // MARK: - Volume Polling

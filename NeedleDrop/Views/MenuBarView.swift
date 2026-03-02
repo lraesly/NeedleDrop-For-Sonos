@@ -2,14 +2,14 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
-    @State private var selectedTab = "speakers"
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header: connection status + zone picker
             HStack {
                 ConnectionStatusView()
                 Spacer()
+                ZonePickerView()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -22,13 +22,20 @@ struct MenuBarView: View {
                 SonosSetupView()
             } else {
                 VStack(spacing: 0) {
-                    // Now playing
+                    // Now playing + controls
                     NowPlayingView()
 
-                    Divider()
+                    // Favorites
+                    if !appState.favorites.isEmpty {
+                        Divider()
 
-                    // Speaker list
-                    SonosSetupView()
+                        HStack {
+                            FavoritesView()
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                    }
                 }
             }
 
