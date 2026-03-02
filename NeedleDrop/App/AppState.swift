@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
     let speakerStore = SpeakerStore()
     lazy var discoveryService = SonosDiscoveryService(speakerStore: speakerStore)
     let eventHandler = SonosEventHandler()
+    let controller = SonosController()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -104,25 +105,71 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Playback Controls (stubs — Phase 3)
+    // MARK: - Active Device
+
+    /// The UPnP device we're currently subscribed to (the coordinator).
+    /// All control commands target this device.
+    private var activeUPnPDevice: UPnPDevice? {
+        guard let speaker = speakers.first else { return nil }
+        return discoveryService.upnpDevice(for: speaker.uuid)
+    }
+
+    // MARK: - Playback Controls
 
     func togglePlayPause() {
-        log.info("togglePlayPause — not yet implemented")
+        guard let device = activeUPnPDevice else { return }
+        Task {
+            if nowPlaying.transportState == .playing {
+                await controller.pause(device: device)
+            } else {
+                await controller.play(device: device)
+            }
+        }
     }
 
     func nextTrack() {
-        log.info("nextTrack — not yet implemented")
+        guard let device = activeUPnPDevice else { return }
+        Task {
+            await controller.next(device: device)
+        }
     }
 
     func previousTrack() {
-        log.info("previousTrack — not yet implemented")
+        guard let device = activeUPnPDevice else { return }
+        Task {
+            await controller.previous(device: device)
+        }
     }
 
     func setVolume(_ level: Int) {
-        log.info("setVolume(\(level)) — not yet implemented")
+        guard let device = activeUPnPDevice else { return }
+        volume = level
+        Task {
+            await controller.setVolume(device: device, level: level)
+        }
     }
 
     func playFavorite(_ favorite: FavoriteItem) {
-        log.info("playFavorite(\(favorite.title)) — not yet implemented")
+        guard let device = activeUPnPDevice else { return }
+        log.info("Playing favorite: \(favorite.title)")
+        Task {
+            await controller.playURI(
+                device: device,
+                uri: favorite.uri,
+                metadata: favorite.meta
+            )
+        }
+    }
+
+    // MARK: - Volume Polling
+
+    /// Fetch the current volume from the active device.
+    func refreshVolume() {
+        guard let device = activeUPnPDevice else { return }
+        Task {
+            if let vol = await controller.getVolume(device: device) {
+                self.volume = vol
+            }
+        }
     }
 }

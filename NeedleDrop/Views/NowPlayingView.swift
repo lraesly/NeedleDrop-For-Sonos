@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Displays the currently playing track with album art, title, and artist.
+/// Displays the currently playing track with album art, title, artist,
+/// transport controls, and volume slider.
 struct NowPlayingView: View {
     @EnvironmentObject var appState: AppState
 
@@ -13,7 +14,11 @@ struct NowPlayingView: View {
             if track.isTVAudio {
                 tvAudioView
             } else {
-                trackView(track)
+                VStack(spacing: 0) {
+                    trackView(track)
+                    transportControls
+                    volumeSlider
+                }
             }
         } else {
             emptyView
@@ -60,36 +65,73 @@ struct NowPlayingView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Transport state indicator
-            transportIndicator
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Transport Indicator
+    // MARK: - Transport Controls
 
-    @ViewBuilder
-    private var transportIndicator: some View {
-        switch nowPlaying.transportState {
-        case .playing:
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.caption)
-                .foregroundColor(.accentColor)
-        case .paused:
-            Image(systemName: "pause.fill")
-                .font(.caption)
+    private var transportControls: some View {
+        HStack(spacing: 20) {
+            Button {
+                appState.previousTrack()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.body)
+            }
+            .buttonStyle(.plain)
+            .help("Previous")
+
+            Button {
+                appState.togglePlayPause()
+            } label: {
+                Image(systemName: nowPlaying.transportState == .playing
+                      ? "pause.fill" : "play.fill")
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+            .help(nowPlaying.transportState == .playing ? "Pause" : "Play")
+
+            Button {
+                appState.nextTrack()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.body)
+            }
+            .buttonStyle(.plain)
+            .help("Next")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Volume Slider
+
+    private var volumeSlider: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "speaker.fill")
+                .font(.caption2)
                 .foregroundColor(.secondary)
-        case .stopped:
-            Image(systemName: "stop.fill")
-                .font(.caption)
+
+            Slider(
+                value: Binding(
+                    get: { Double(appState.volume) },
+                    set: { appState.setVolume(Int($0)) }
+                ),
+                in: 0...100,
+                step: 1
+            )
+            .controlSize(.small)
+
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.caption2)
                 .foregroundColor(.secondary)
-        case .transitioning:
-            ProgressView()
-                .controlSize(.small)
-        case .unknown:
-            EmptyView()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .onAppear {
+            appState.refreshVolume()
         }
     }
 
