@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "needledrop-scrobbler"
+version = "2.0.0"
+description = "Slim Sonos-to-Last.fm scrobbler — event listener + scrobble only"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "soco>=0.30",
+    "pylast>=5.1",
+    "sqlalchemy>=2.0",
+    "click>=8.0",
+    "rich>=13.0",
+    "tomli-w>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "zeroconf>=0.131",
+]
+
+[project.scripts]
+needledrop = "needledrop.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/needledrop"]

@@ -44,14 +44,30 @@ struct MenuBarView: View {
                 }
             }
 
-            // Library services (collapsible)
+            // Services (collapsible)
             if !appState.speakers.isEmpty {
                 Divider()
 
                 DisclosureGroup {
                     LibraryServicesView()
+
+                    Divider().padding(.vertical, 4)
+
+                    Text("Scrobbler")
+                        .font(.caption)
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 4)
+                        .padding(.bottom, 2)
+
+                    ScrobblerConfigView()
+
+                    if appState.scrobblerClient.config != nil {
+                        ScrobbleFiltersView()
+                    }
                 } label: {
-                    Text("Music Services")
+                    Text("Services")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

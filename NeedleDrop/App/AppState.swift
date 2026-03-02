@@ -40,6 +40,11 @@ final class AppState: ObservableObject {
     let appleMusicService = AppleMusicService()
     @Published var lastSaveResult: LibrarySaveDetail?
 
+    // MARK: - Scrobbler
+
+    let scrobblerClient = ScrobblerClient()
+    let scrobbleTracker = ScrobbleTracker()
+
     // MARK: - Menu Bar
 
     var menuBarIcon: String {
@@ -61,6 +66,7 @@ final class AppState: ObservableObject {
     init() {
         setupBindings()
         startDiscovery()
+        scrobblerClient.loadPersistedConfig()
     }
 
     // MARK: - Discovery
@@ -88,10 +94,17 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         // Mirror event handler's now-playing state to app state
+        // and feed scrobble tracker
         eventHandler.$nowPlaying
             .receive(on: DispatchQueue.main)
             .sink { [weak self] nowPlaying in
-                self?.nowPlaying = nowPlaying
+                guard let self else { return }
+                self.nowPlaying = nowPlaying
+                self.scrobbleTracker.update(
+                    trackId: nowPlaying.track?.id,
+                    transportState: nowPlaying.transportState,
+                    durationSeconds: nowPlaying.track?.durationSeconds ?? 0
+                )
             }
             .store(in: &cancellables)
     }

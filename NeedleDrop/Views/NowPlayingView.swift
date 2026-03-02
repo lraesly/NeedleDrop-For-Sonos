@@ -57,11 +57,20 @@ struct NowPlayingView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
 
-                if let album = track.album {
-                    Text(album)
-                        .font(.caption)
-                        .foregroundColor(.secondary.opacity(0.7))
-                        .lineLimit(1)
+                HStack(spacing: 4) {
+                    if let album = track.album {
+                        Text(album)
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .lineLimit(1)
+                    }
+
+                    if appState.scrobbleTracker.isScrobbled(track.id) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                            .help("Scrobbled")
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
