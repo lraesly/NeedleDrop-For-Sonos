@@ -11,14 +11,19 @@ struct NowPlayingView: View {
 
     var body: some View {
         if let track = nowPlaying.track {
-            if track.isTVAudio {
-                tvAudioView
-            } else {
-                VStack(spacing: 0) {
-                    trackView(track)
-                    transportControls
-                    volumeSlider
+            VStack(spacing: 0) {
+                trackView(track)
+                if !track.isTVAudio {
+                    PlaybackProgressBar(
+                        position: appState.playbackPosition,
+                        duration: appState.playbackDuration,
+                        showTimestamps: false
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
                 }
+                transportControls
+                volumeSlider
             }
         } else {
             emptyView
@@ -30,46 +35,86 @@ struct NowPlayingView: View {
     @ViewBuilder
     private func trackView(_ track: TrackInfo) -> some View {
         HStack(spacing: 10) {
-            // Album art
-            CachedAsyncImage(url: track.albumArtURL) { image in
-                image
+            // Album art / TV icon
+            if track.isTVAudio {
+                Image("TVIcon")
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                ZStack {
-                    Color(.controlBackgroundColor)
-                    Image(systemName: "music.note")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 56, height: 56)
+                    .frame(width: 64, height: 64)
+            } else {
+                CachedAsyncImage(url: track.albumArtURL) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        Color(.controlBackgroundColor)
+                        Image(systemName: "music.note")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onTapGesture {
+                    if let url = track.albumArtURL {
+                        appState.albumArtWindow.show(url: url)
+                    }
+                }
+                .help("Click to enlarge")
             }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // Track info
             VStack(alignment: .leading, spacing: 2) {
-                Text(track.title)
-                    .font(.system(.body, weight: .medium))
-                    .lineLimit(2)
+                HStack(alignment: .top, spacing: 4) {
+                    Text(track.title)
+                        .font(.system(.body, weight: .medium))
+                        .lineLimit(2)
 
-                Text(track.artist)
+                    if !track.isTVAudio, !track.isDJSegment {
+                        Spacer(minLength: 2)
+                        heartButton
+                            .padding(.top, 1)
+                    }
+                }
+
+                Text(track.isTVAudio ? (nowPlaying.zoneName ?? "") : track.artist)
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
 
-                HStack(spacing: 4) {
-                    if let album = track.album {
-                        Text(album)
+                if track.isTVAudio {
+                    if let zone = appState.activeZone, !zone.members.isEmpty {
+                        Text("\(zone.members.count + 1) speakers")
                             .font(.caption)
                             .foregroundColor(.secondary.opacity(0.7))
                             .lineLimit(1)
                     }
+                } else {
+                    HStack(spacing: 4) {
+                        if let album = track.album {
+                            Text(album)
+                                .font(.caption)
+                                .foregroundColor(.secondary.opacity(0.7))
+                                .lineLimit(1)
+                                .layoutPriority(-1)
+                        }
 
-                    if appState.scrobbleTracker.isScrobbled(track.id) {
-                        Image(systemName: "checkmark.circle.fill")
+                        if appState.scrobbleTracker.isScrobbled(track.id) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundColor(.green)
+                                .fixedSize()
+                                .help("Scrobbled")
+                        }
+                    }
+
+                    if let station = nowPlaying.mediaTitle {
+                        Text(station)
                             .font(.caption2)
-                            .foregroundColor(.green)
-                            .help("Scrobbled")
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .lineLimit(1)
                     }
                 }
             }
@@ -82,39 +127,43 @@ struct NowPlayingView: View {
     // MARK: - Transport Controls
 
     private var transportControls: some View {
-        HStack(spacing: 20) {
-            Button {
-                appState.previousTrack()
-            } label: {
-                Image(systemName: "backward.fill")
-                    .font(.body)
+        let isTV = nowPlaying.track?.isTVAudio == true
+
+        return HStack(spacing: 20) {
+            if !isTV {
+                Button {
+                    appState.previousTrack()
+                } label: {
+                    Image(systemName: "backward.fill")
+                        .font(.body)
+                }
+                .buttonStyle(.plain)
+                .help("Previous")
             }
-            .buttonStyle(.plain)
-            .help("Previous")
 
             Button {
                 appState.togglePlayPause()
             } label: {
-                Image(systemName: nowPlaying.transportState == .playing
-                      ? "pause.fill" : "play.fill")
+                let isPlaying = isTV
+                    ? !appState.isTVMuted
+                    : nowPlaying.transportState == .playing
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
             }
             .buttonStyle(.plain)
-            .help(nowPlaying.transportState == .playing ? "Pause" : "Play")
+            .help(isTV
+                  ? (appState.isTVMuted ? "Unmute" : "Mute")
+                  : (nowPlaying.transportState == .playing ? "Pause" : "Play"))
 
-            Button {
-                appState.nextTrack()
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.body)
-            }
-            .buttonStyle(.plain)
-            .help("Next")
-
-            // Heart / save to library
-            if appState.canSaveToLibrary {
-                Spacer()
-                heartButton
+            if !isTV {
+                Button {
+                    appState.nextTrack()
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.body)
+                }
+                .buttonStyle(.plain)
+                .help("Next")
             }
         }
         .padding(.horizontal, 12)
@@ -123,20 +172,34 @@ struct NowPlayingView: View {
 
     // MARK: - Heart Button
 
+    @ViewBuilder
     private var heartButton: some View {
-        let isSaved = appState.lastSaveResult?.trackId == nowPlaying.track?.id
-            && appState.lastSaveResult?.anySucceeded == true
+        let trackId = nowPlaying.track?.id
+        let isSaved = trackId.map { appState.savedTrackIds.contains($0) } ?? false
+        let isSaving = trackId != nil && appState.savingTrackId == trackId
+        let canSave = appState.canSaveToLibrary
 
-        return Button {
-            appState.saveToLibrary()
-        } label: {
-            Image(systemName: isSaved ? "heart.fill" : "heart")
+        if isSaved {
+            // Show a plain image — no disabled-button dimming
+            Image(systemName: "heart.fill")
                 .font(.body)
-                .foregroundColor(isSaved ? .red : .secondary)
+                .foregroundColor(.red)
+                .help("In your library")
+        } else {
+            Button {
+                appState.saveToLibrary()
+            } label: {
+                Image(systemName: isSaving ? "heart.fill" : "heart")
+                    .font(.body)
+                    .foregroundColor(
+                        isSaving ? .red.opacity(0.4) :
+                        canSave ? .secondary : .secondary.opacity(0.3)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(canSave ? "Save to library" : "Connect Spotify or Apple Music in Setup to save tracks")
+            .disabled(isSaving || !canSave)
         }
-        .buttonStyle(.plain)
-        .help("Save to library")
-        .disabled(isSaved)
     }
 
     // MARK: - Volume Slider
@@ -147,15 +210,7 @@ struct NowPlayingView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
 
-            Slider(
-                value: Binding(
-                    get: { Double(appState.volume) },
-                    set: { appState.setVolume(Int($0)) }
-                ),
-                in: 0...100,
-                step: 1
-            )
-            .controlSize(.small)
+            dropdownVolumeSlider
 
             Image(systemName: "speaker.wave.3.fill")
                 .font(.caption2)
@@ -168,33 +223,42 @@ struct NowPlayingView: View {
         }
     }
 
-    // MARK: - TV Audio
+    // MARK: - Custom Volume Slider
 
-    private var tvAudioView: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Color(.controlBackgroundColor)
-                Image(systemName: "tv")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
+    /// Custom single-track volume slider matching the mini player style.
+    private var dropdownVolumeSlider: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let ratio = CGFloat(appState.volume) / 100.0
+            let trackHeight: CGFloat = 4
+            let thumbSize: CGFloat = 12
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(height: trackHeight)
+
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(Color.accentColor)
+                    .frame(width: ratio * width, height: trackHeight)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                    .offset(x: ratio * (width - thumbSize))
             }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("TV Audio")
-                    .font(.system(.body, weight: .medium))
-
-                if let zone = nowPlaying.zoneName {
-                    Text(zone)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: thumbSize)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let newRatio = max(0, min(value.location.x / width, 1.0))
+                        appState.setVolume(Int(newRatio * 100))
+                    }
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(height: 12)
     }
 
     // MARK: - Empty State

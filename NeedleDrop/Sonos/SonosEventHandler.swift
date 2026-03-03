@@ -6,7 +6,7 @@ import SwiftUPnP
 private let log = Logger(subsystem: "com.needledrop", category: "SonosEventHandler")
 
 /// TV/HDMI audio URI prefix.
-private let tvAudioURIPrefix = "x-sonos-htastream://"
+private let tvAudioURIPrefix = "x-sonos-htastream:"
 
 /// Subscribes to AVTransport events on a Sonos group coordinator and publishes
 /// now-playing state changes.
@@ -31,11 +31,29 @@ final class SonosEventHandler: ObservableObject {
 
     // MARK: - Subscription State
 
+    /// UUID of the device we're currently subscribed to (nil if not subscribed).
+    /// Stripped of "uuid:" prefix to match zone coordinator UUIDs (e.g. "RINCON_xxx").
+    var subscribedDeviceUUID: String? {
+        subscribedDevice?.uuid.replacingOccurrences(of: "uuid:", with: "")
+    }
+
     private var subscribedDevice: UPnPDevice?
     private var subscribedSpeakerIP: String?
     private var avTransportService: AVTransport1Service?
     private var eventTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - URLSession (no HTTP caching)
+
+    /// Dedicated session for SOAP queries — caching disabled since responses are
+    /// real-time transport state, never worth caching.
+    private static let soapSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 5
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: config)
+    }()
 
     // MARK: - Station Transition Art State Machine
 
@@ -45,6 +63,16 @@ final class SonosEventHandler: ObservableObject {
     private var awaitingStationArt = false
     /// The last `AVTransportURI` we saw (for detecting station changes).
     private var lastAVTransportURI: String?
+    /// Persistent station/logo art URL for the current station.
+    /// Unlike `pendingArtURL` (consumed on first track change), this persists
+    /// across the station session and serves as fallback art for DJ segments.
+    private var stationArtURL: URL?
+
+    /// Persistent station/service name for the current station session.
+    /// Set from GetMediaInfo (SOAP) and enqueuedTransportURIMetaData (events).
+    /// Only cleared on actual station changes. Used as a fallback so `mediaTitle`
+    /// survives race conditions between event processing and SOAP fetches.
+    private var currentMediaTitle: String?
 
     // MARK: - Subscribe / Unsubscribe
 
@@ -84,6 +112,8 @@ final class SonosEventHandler: ObservableObject {
         pendingArtURL = nil
         awaitingStationArt = false
         lastAVTransportURI = nil
+        stationArtURL = nil
+        currentMediaTitle = nil
 
         // Subscribe to UPnP events (HTTP SUBSCRIBE)
         await service.subscribeToEvents()
@@ -95,7 +125,11 @@ final class SonosEventHandler: ObservableObject {
         service.stateSubject
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                guard let self else { return }
+                guard let self else {
+                    log.warning("stateSubject sink: self is nil")
+                    return
+                }
+                log.debug("stateSubject sink fired")
                 Task { @MainActor in
                     await self.handleEvent(state)
                 }
@@ -103,6 +137,12 @@ final class SonosEventHandler: ObservableObject {
             .store(in: &cancellables)
 
         log.info("Subscribed to \(zoneName)")
+
+        // Fetch current state via SOAP for immediate display. This is important
+        // for TV audio and other non-streaming sources where events may not include
+        // enough initial state. Events will override this when they arrive (events
+        // are more authoritative for radio streams which have live streamContent).
+        await fetchCurrentState(speakerIP: speakerIP)
     }
 
     /// Unsubscribe from the current device's events.
@@ -121,12 +161,233 @@ final class SonosEventHandler: ObservableObject {
         subscribedSpeakerIP = nil
     }
 
+    // MARK: - Initial State Fetch
+
+    /// Fetch the current playing state for a zone using direct SOAP calls.
+    ///
+    /// Called when UPnP device isn't available yet (SSDP still running),
+    /// so we can't subscribe to events but can still query via HTTP.
+    func fetchInitialState(speakerIP: String, zoneName: String) async {
+        nowPlaying.zoneName = zoneName
+        await fetchCurrentState(speakerIP: speakerIP)
+    }
+
+    /// Fetch the current transport state and track metadata via direct SOAP calls.
+    ///
+    /// UPnP event subscriptions only deliver *changes*. On first subscribe we need
+    /// to query GetTransportInfo + GetPositionInfo to populate the current track.
+    private func fetchCurrentState(speakerIP: String) async {
+        let controlURL = "http://\(speakerIP):1400/MediaRenderer/AVTransport/Control"
+
+        // Run all SOAP queries concurrently
+        async let transportResult = soapQuery(
+            url: controlURL,
+            action: "GetTransportInfo",
+            elements: ["CurrentTransportState"]
+        )
+        async let positionResult = soapQuery(
+            url: controlURL,
+            action: "GetPositionInfo",
+            elements: ["TrackMetaData", "TrackURI", "TrackDuration"]
+        )
+        async let mediaResult = soapQuery(
+            url: controlURL,
+            action: "GetMediaInfo",
+            elements: ["CurrentURI", "CurrentURIMetaData"]
+        )
+
+        let transportFields = await transportResult
+        let positionFields = await positionResult
+        let mediaFields = await mediaResult
+
+        let transportState = transportFields["CurrentTransportState"]
+        let trackMetaData = positionFields["TrackMetaData"]
+        let trackURI = positionFields["TrackURI"]
+        let durationStr = positionFields["TrackDuration"]
+        let enqueuedURI = mediaFields["CurrentURI"]
+        let mediaMetaXML = mediaFields["CurrentURIMetaData"]
+
+        // Parse media/station title from CurrentURIMetaData (for preset matching)
+        var mediaTitle: String?
+        if let xml = mediaMetaXML, let mediaMeta = DIDLLiteParser.parse(xml) {
+            mediaTitle = mediaMeta.title
+        }
+        // Persist the station title so it survives race conditions
+        if let mediaTitle {
+            currentMediaTitle = mediaTitle
+        }
+
+        log.info("SOAP fields — transport: \(transportFields)")
+        log.info("SOAP fields — position: \(positionFields.mapValues { $0.prefix(80) + ($0.count > 80 ? "…" : "") })")
+        log.info("SOAP fields — media: \(mediaFields.mapValues { $0.prefix(80) + ($0.count > 80 ? "…" : "") })")
+        log.info("GetMediaInfo: enqueuedURI=\(enqueuedURI ?? "nil"), mediaTitle=\(mediaTitle ?? "nil")")
+        log.info("GetPositionInfo: trackURI=\(trackURI ?? "nil")")
+
+        // Parse transport state
+        let state: TransportState
+        if let ts = transportState {
+            state = TransportState(rawValue: ts) ?? .unknown
+        } else {
+            state = .unknown
+        }
+
+        // Parse duration "H:MM:SS" → seconds
+        let duration = parseDuration(durationStr)
+
+        // Check for TV audio — try TrackURI first, then CurrentURI from GetMediaInfo
+        let candidateURIs = [trackURI, enqueuedURI].compactMap { $0 }
+        log.info("TV check: candidates=\(candidateURIs), looking for prefix '\(tvAudioURIPrefix)'")
+        let tvURI = candidateURIs.first { $0.hasPrefix(tvAudioURIPrefix) }
+        if let uri = tvURI {
+            nowPlaying = NowPlayingState(
+                track: TrackInfo(
+                    title: "TV Audio",
+                    artist: "",
+                    album: nil,
+                    durationSeconds: 0,
+                    albumArtURL: nil,
+                    sourceURI: uri
+                ),
+                transportState: state,
+                zoneName: nowPlaying.zoneName
+            )
+            log.info("Initial state: TV audio (\(state.rawValue))")
+            return
+        }
+
+        // Parse DIDL-Lite metadata
+        if let metaXML = trackMetaData,
+           var meta = DIDLLiteParser.parse(metaXML) {
+            meta = meta.filtered
+
+            var artist = meta.creator
+            var title = meta.title
+            var album = meta.album
+            let artURL = meta.resolvedAlbumArtURL(speakerIP: speakerIP)
+
+            // For radio: streamContent has the CURRENT track info and should
+            // override dc:title/dc:creator which often contain the stream/station
+            // name rather than the actual song (e.g. "secretagent-128-mp3").
+            if let streamInfo = meta.parsedStreamContent {
+                if let sArtist = streamInfo.artist { artist = sArtist }
+                if let sTitle = streamInfo.title { title = sTitle }
+                if let sAlbum = streamInfo.album { album = sAlbum }
+            }
+
+            if let artist, let title {
+                var track = TrackInfo(
+                    title: title,
+                    artist: artist,
+                    album: album,
+                    durationSeconds: duration,
+                    albumArtURL: artURL,
+                    sourceURI: trackURI
+                )
+
+                nowPlaying = NowPlayingState(
+                    track: track,
+                    transportState: state,
+                    zoneName: nowPlaying.zoneName,
+                    enqueuedURI: enqueuedURI,
+                    mediaTitle: mediaTitle
+                )
+
+                // Seed station state so the first event doesn't trigger a
+                // false station-change and so DJ segments have fallback art.
+                if let uri = enqueuedURI {
+                    lastAVTransportURI = uri
+                }
+                if let artURL {
+                    stationArtURL = artURL
+                }
+
+                log.info("Initial state: \(artist) — \(title) (\(state.rawValue)), media=\(mediaTitle ?? "nil")")
+
+                // Enrich art + duration from iTunes
+                Task {
+                    if let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title) {
+                        if self.nowPlaying.track?.id == track.id {
+                            if let url = enrichment.artURL {
+                                track.albumArtURL = url
+                            }
+                            if let dur = enrichment.durationSeconds, track.durationSeconds == 0 {
+                                track.durationSeconds = dur
+                                log.debug("Enriched duration for \(artist) — \(title): \(dur)s")
+                            }
+                            self.nowPlaying.track = track
+                        }
+                    }
+                }
+                return
+            }
+        }
+
+        // No track metadata — just update transport state
+        nowPlaying = NowPlayingState(
+            track: nil,
+            transportState: state,
+            zoneName: nowPlaying.zoneName
+        )
+        log.info("Initial state: no track (\(state.rawValue))")
+    }
+
+    /// Send a SOAP query and extract multiple elements from the response.
+    private nonisolated func soapQuery(url: String, action: String, elements: [String]) async -> [String: String] {
+        guard let url = URL(string: url) else { return [:] }
+
+        let soapBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+          <s:Body>
+            <u:\(action) xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+              <InstanceID>0</InstanceID>
+            </u:\(action)>
+          </s:Body>
+        </s:Envelope>
+        """
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = soapBody.data(using: .utf8)
+        request.setValue("text/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            "\"urn:schemas-upnp-org:service:AVTransport:1#\(action)\"",
+            forHTTPHeaderField: "SOAPAction"
+        )
+        request.timeoutInterval = 5
+
+        do {
+            let (data, response) = try await Self.soapSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else { return [:] }
+
+            let parser = SOAPMultiElementExtractor(data: data, targetElements: Set(elements))
+            return parser.extract()
+        } catch {
+            return [:]
+        }
+    }
+
+    /// Parse "H:MM:SS" or "0:MM:SS" duration string to seconds.
+    private nonisolated func parseDuration(_ str: String?) -> Int {
+        guard let str, !str.isEmpty, str != "NOT_IMPLEMENTED" else { return 0 }
+        let parts = str.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 3 else { return 0 }
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    }
+
     // MARK: - Event Handling
 
     /// Process a single AVTransport state change event.
     private func handleEvent(_ state: AVTransport1Service.State) async {
         guard let lastChange = state.lastChange,
-              let speakerIP = subscribedSpeakerIP else { return }
+              let speakerIP = subscribedSpeakerIP else {
+            log.debug("Event skipped: lastChange=\(state.lastChange != nil), speakerIP=\(self.subscribedSpeakerIP != nil)")
+            return
+        }
+
+        log.debug("Event received (\(lastChange.count) bytes)")
 
         // 1. Parse the LastChange XML
         guard let event = LastChangeParser.parse(lastChange) else {
@@ -135,30 +396,67 @@ final class SonosEventHandler: ObservableObject {
         }
 
         // 2. Detect station change
+        //    Only trigger when we had a previous URI (lastAVTransportURI != nil).
+        //    The first event after subscribe() has lastAVTransportURI == nil — that's
+        //    not a station change, just the initial state arriving via events.
         let transportURI = event.avTransportURI ?? event.enqueuedTransportURI
-        let stationChanged = event.avTransportURI != nil && event.avTransportURI != lastAVTransportURI
+        let stationChanged = event.avTransportURI != nil
+            && lastAVTransportURI != nil
+            && event.avTransportURI != lastAVTransportURI
         if let uri = event.avTransportURI {
             lastAVTransportURI = uri
         }
         if stationChanged {
             pendingArtURL = nil
+            stationArtURL = nil
+            currentMediaTitle = nil
             awaitingStationArt = true
-            log.debug("Station change detected")
+            // Clear stale media title immediately — the new station's title will
+            // arrive in a subsequent event's enqueuedTransportURIMetaData.
+            nowPlaying.mediaTitle = nil
+            log.debug("Station change detected — cleared mediaTitle")
+        }
+
+        // 2b. Update media title from enqueued metadata (station/favorite name).
+        //     Only write to @Published nowPlaying when the value actually changes
+        //     to avoid unnecessary SwiftUI redraws (SiriusXM sends frequent events).
+        if let metaXML = event.enqueuedTransportURIMetaData,
+           let meta = DIDLLiteParser.parse(metaXML),
+           let title = meta.title {
+            currentMediaTitle = title
+            if nowPlaying.mediaTitle != title {
+                nowPlaying.mediaTitle = title
+                log.debug("Media title from event: \(title)")
+            }
+        }
+
+        // 2c. Update enqueued URI from event (only on change)
+        if let enqueued = event.enqueuedTransportURI,
+           enqueued != nowPlaying.enqueuedURI {
+            nowPlaying.enqueuedURI = enqueued
+            log.debug("Enqueued URI from event: \(enqueued)")
         }
 
         // 3. Check for TV audio
         if let uri = transportURI, uri.hasPrefix(tvAudioURIPrefix) {
-            log.info("TV audio detected")
+            // Use actual transport state from event, fall back to current state
+            let tvState: TransportState
+            if let ts = event.transportState {
+                tvState = TransportState(rawValue: ts) ?? nowPlaying.transportState
+            } else {
+                tvState = nowPlaying.transportState
+            }
+            log.info("TV audio detected (\(tvState.rawValue))")
             nowPlaying = NowPlayingState(
                 track: TrackInfo(
-                    title: "TV",
+                    title: "TV Audio",
                     artist: "",
                     album: nil,
                     durationSeconds: 0,
                     albumArtURL: nil,
                     sourceURI: uri
                 ),
-                transportState: .playing,
+                transportState: tvState,
                 zoneName: nowPlaying.zoneName
             )
             return
@@ -178,6 +476,7 @@ final class SonosEventHandler: ObservableObject {
         var newAlbum: String?
         var newArtURL: URL?
         let newDuration = event.durationSeconds
+        var isDJSegment = false
 
         if let metaXML = event.currentTrackMetaData,
            var meta = DIDLLiteParser.parse(metaXML) {
@@ -190,35 +489,46 @@ final class SonosEventHandler: ObservableObject {
             newAlbum = meta.album
             newArtURL = meta.resolvedAlbumArtURL(speakerIP: speakerIP)
 
-            // Fall back to streamContent for radio
-            if newArtist == nil || newTitle == nil {
-                if let streamInfo = meta.parsedStreamContent {
-                    if newArtist == nil { newArtist = streamInfo.artist }
-                    if newTitle == nil { newTitle = streamInfo.title }
-                    if newAlbum == nil { newAlbum = streamInfo.album }
-                }
+            // For radio: streamContent has the CURRENT track info and should
+            // override dc:title/dc:creator which often contain the stream/station
+            // name rather than the actual song (e.g. "secretagent-128-mp3").
+            if let streamInfo = meta.parsedStreamContent {
+                if let artist = streamInfo.artist { newArtist = artist }
+                if let title = streamInfo.title { newTitle = title }
+                if let album = streamInfo.album { newAlbum = album }
+                isDJSegment = streamInfo.isDJOrNonMusic
             }
         }
 
         // 6. Station-transition art capture
         if let artURL = newArtURL, awaitingStationArt, pendingArtURL == nil {
             pendingArtURL = artURL
+            stationArtURL = artURL // Persist for DJ segment fallback
             awaitingStationArt = false
             log.debug("Captured station-transition art: \(artURL)")
         }
 
         // 7. Track change detection
-        if let artist = newArtist, let title = newTitle {
+        // For radio/DJ segments, artist may be nil — treat as empty string
+        let resolvedTitle = newTitle
+        let resolvedArtist = newArtist ?? (resolvedTitle != nil ? "" : nil)
+
+        if let title = resolvedTitle, let artist = resolvedArtist {
             let newTrackID = "\(artist)-\(title)"
             let oldTrackID = nowPlaying.track?.id
 
             if newTrackID != oldTrackID {
-                // Use station-transition art if available (more reliable than current event's art)
-                let artURL = pendingArtURL ?? newArtURL
+                // Use station-transition art if available (more reliable than current event's art).
+                // For DJ segments, fall back to persistent station art (logo).
+                let artURL = pendingArtURL ?? newArtURL ?? (isDJSegment ? stationArtURL : nil)
                 pendingArtURL = nil
                 awaitingStationArt = false
 
-                log.info("Track change: \(artist) — \(title)")
+                if isDJSegment {
+                    log.info("DJ segment: \(artist) — \(title)")
+                } else {
+                    log.info("Track change: \(artist) — \(title)")
+                }
 
                 // Build initial track info with Sonos art
                 var track = TrackInfo(
@@ -227,24 +537,43 @@ final class SonosEventHandler: ObservableObject {
                     album: newAlbum,
                     durationSeconds: newDuration,
                     albumArtURL: artURL,
-                    sourceURI: transportURI
+                    sourceURI: transportURI,
+                    isDJSegment: isDJSegment
                 )
 
                 // Publish immediately with Sonos art
+                // Carry forward media title: prefer event metadata, then current
+                // nowPlaying value, then the persistent station title as fallback.
+                var updatedMediaTitle = nowPlaying.mediaTitle ?? currentMediaTitle
+                if let metaXML = event.enqueuedTransportURIMetaData,
+                   let meta = DIDLLiteParser.parse(metaXML),
+                   let mTitle = meta.title {
+                    currentMediaTitle = mTitle
+                    updatedMediaTitle = mTitle
+                }
                 nowPlaying = NowPlayingState(
                     track: track,
                     transportState: newTransportState,
-                    zoneName: nowPlaying.zoneName
+                    zoneName: nowPlaying.zoneName,
+                    enqueuedURI: event.enqueuedTransportURI ?? nowPlaying.enqueuedURI,
+                    mediaTitle: updatedMediaTitle
                 )
 
-                // Enrich art from iTunes in background (updates UI when done)
-                Task {
-                    if let enrichedURL = await albumArtEnricher.searchArt(artist: artist, title: title) {
-                        // Only update if we're still on the same track
-                        if self.nowPlaying.track?.id == newTrackID {
-                            track.albumArtURL = enrichedURL
-                            self.nowPlaying.track = track
-                            log.debug("Enriched art for \(artist) — \(title)")
+                // Enrich art + duration from iTunes in background (only for actual songs with artist)
+                if !artist.isEmpty, !isDJSegment {
+                    Task {
+                        if let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title) {
+                            // Only update if we're still on the same track
+                            if self.nowPlaying.track?.id == newTrackID {
+                                if let url = enrichment.artURL {
+                                    track.albumArtURL = url
+                                }
+                                if let dur = enrichment.durationSeconds, track.durationSeconds == 0 {
+                                    track.durationSeconds = dur
+                                    log.debug("Enriched duration for \(artist) — \(title): \(dur)s")
+                                }
+                                self.nowPlaying.track = track
+                            }
                         }
                     }
                 }
@@ -253,10 +582,73 @@ final class SonosEventHandler: ObservableObject {
             }
         }
 
-        // 8. Transport state change (same track, different state)
+        // 8. Between-song transition art: show station art when track metadata
+        //    disappears (e.g., SomaFM DJ segments between songs). The art from
+        //    the event is the station logo — swap it in so the UI visually signals
+        //    the transition. Track info stays the same (no banner/scrobble).
+        if resolvedTitle == nil,
+           let artURL = newArtURL,
+           var track = nowPlaying.track,
+           artURL != track.albumArtURL {
+            track.albumArtURL = artURL
+            nowPlaying.track = track
+            log.debug("Transition art: \(artURL)")
+        }
+
+        // 9. Transport state change (same track, different state)
         if newTransportState != nowPlaying.transportState {
             log.debug("Transport state: \(newTransportState.rawValue)")
             nowPlaying.transportState = newTransportState
+        }
+    }
+}
+
+// MARK: - SOAP Multi-Element Extractor
+
+/// Generic XML parser that extracts text content of multiple named elements
+/// from a SOAP response envelope.
+private class SOAPMultiElementExtractor: NSObject, XMLParserDelegate {
+    private let data: Data
+    private let targetElements: Set<String>
+    private var currentElement = ""
+    private var currentText = ""
+    private var extractedValues: [String: String] = [:]
+
+    init(data: Data, targetElements: Set<String>) {
+        self.data = data
+        self.targetElements = targetElements
+    }
+
+    func extract() -> [String: String] {
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.shouldProcessNamespaces = false
+        parser.parse()
+        return extractedValues
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String,
+                namespaceURI: String?, qualifiedName: String?,
+                attributes: [String: String] = [:]) {
+        currentElement = element
+        if targetElements.contains(element) {
+            currentText = ""
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if targetElements.contains(currentElement) {
+            currentText += string
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String,
+                namespaceURI: String?, qualifiedName: String?) {
+        if targetElements.contains(element) && extractedValues[element] == nil {
+            let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                extractedValues[element] = text
+            }
         }
     }
 }

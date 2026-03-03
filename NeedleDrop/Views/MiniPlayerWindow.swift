@@ -46,6 +46,13 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+/// NSHostingView subclass that prevents the window background drag from
+/// intercepting SwiftUI gesture interactions (e.g. volume slider DragGesture).
+/// The title bar remains draggable; only the content area is excluded.
+private final class NonDraggableHostingView<Content: View>: NSHostingView<Content> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
 // MARK: - Mini Player Window
 
 /// A floating, always-on-top mini player panel.
@@ -58,9 +65,14 @@ private final class KeyablePanel: NSPanel {
 @MainActor
 final class MiniPlayerWindow {
     private var panel: NSPanel?
-    private let panelWidth: CGFloat = 300
-    private let panelHeight: CGFloat = 120
     private var lastOrigin: NSPoint?
+
+    private var panelWidth: CGFloat {
+        appStateRef?.miniPlayerSize == .large ? 400 : 300
+    }
+    private var panelHeight: CGFloat {
+        appStateRef?.miniPlayerSize == .large ? 385 : 135
+    }
     private var closeObserver: NSObjectProtocol?
     private var keyObserver: NSObjectProtocol?
     private var resignKeyObserver: NSObjectProtocol?
@@ -96,8 +108,10 @@ final class MiniPlayerWindow {
         p.standardWindowButton(.miniaturizeButton)?.isHidden = true
         p.standardWindowButton(.zoomButton)?.isHidden = true
 
-        // Host the compact SwiftUI view
-        let hostingView = NSHostingView(
+        // Host the compact SwiftUI view.
+        // NonDraggableHostingView prevents isMovableByWindowBackground from
+        // intercepting SwiftUI DragGestures (volume slider, progress bar, etc.).
+        let hostingView = NonDraggableHostingView(
             rootView: MiniPlayerView().environmentObject(appState)
         )
         p.contentView = hostingView
@@ -180,11 +194,32 @@ final class MiniPlayerWindow {
         panel?.isVisible ?? false
     }
 
-    /// Update the title bar to reflect the current track.
-    func updateTitle(for track: TrackInfo?) {
+    /// Resize the panel to match a new mini player size setting.
+    /// Keeps the top-left corner pinned and animates the transition.
+    func resize(for size: MiniPlayerSize) {
+        guard let panel else { return }
+        let newWidth: CGFloat = size == .large ? 400 : 300
+        let newHeight: CGFloat = size == .large ? 385 : 135
+
+        // Keep top-left corner in place (macOS origin is bottom-left)
+        let currentFrame = panel.frame
+        let newOriginY = currentFrame.origin.y + currentFrame.height - newHeight
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: newOriginY,
+            width: newWidth,
+            height: newHeight
+        )
+        panel.setFrame(newFrame, display: true, animate: true)
+    }
+
+    /// Update the title bar to reflect the current track or station.
+    func updateTitle(for track: TrackInfo?, mediaTitle: String?) {
         guard let panel else { return }
         if let track, track.isTVAudio {
             panel.title = "TV Audio"
+        } else if let mediaTitle {
+            panel.title = mediaTitle
         } else if let track {
             panel.title = "\(track.artist) – \(track.title)"
         } else {

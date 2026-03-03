@@ -10,6 +10,7 @@ struct LastChangeEvent: Equatable {
     var currentTrackDuration: String?   // "H:MM:SS" or "MM:SS"
     var avTransportURI: String?
     var enqueuedTransportURI: String?
+    var enqueuedTransportURIMetaData: String?  // DIDL-Lite with station/media title
 }
 
 /// Parses the LastChange XML from AVTransport UPnP events.
@@ -73,6 +74,8 @@ final class LastChangeParser: NSObject, XMLParserDelegate {
             result.avTransportURI = val.isEmpty ? nil : val
         case "EnqueuedTransportURI":
             result.enqueuedTransportURI = val.isEmpty ? nil : val
+        case "EnqueuedTransportURIMetaData":
+            result.enqueuedTransportURIMetaData = val.isEmpty ? nil : val
         default:
             break
         }

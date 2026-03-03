@@ -149,6 +149,67 @@ final class SonosController {
         }
     }
 
+    // MARK: - Mute
+
+    /// Get the current mute state.
+    func getMute(device: UPnPDevice) async -> Bool? {
+        guard let service = await renderingControl(for: device) else {
+            log.error("No RenderingControl service on device \(device.uuid)")
+            return nil
+        }
+        do {
+            let response = try await service.getMute(instanceID: 0, channel: .master)
+            return response.currentMute
+        } catch {
+            log.error("GetMute failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Set the mute state.
+    func setMute(device: UPnPDevice, muted: Bool) async {
+        guard let service = await renderingControl(for: device) else {
+            log.error("No RenderingControl service on device \(device.uuid)")
+            return
+        }
+        do {
+            try await service.setMute(instanceID: 0, channel: .master, desiredMute: muted)
+            log.debug("Mute set to \(muted)")
+        } catch {
+            log.error("SetMute failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Position Info
+
+    /// Get the current playback position and track duration.
+    /// Returns (positionSeconds, durationSeconds), or nil on failure.
+    func getPositionInfo(device: UPnPDevice) async -> (position: Int, duration: Int)? {
+        guard let service = await avTransport(for: device) else {
+            log.error("No AVTransport service on device \(device.uuid)")
+            return nil
+        }
+        do {
+            let response = try await service.getPositionInfo(instanceID: 0)
+            let position = Self.parseDuration(response.relTime)
+            let duration = Self.parseDuration(response.trackDuration)
+            return (position, duration)
+        } catch {
+            log.error("GetPositionInfo failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parse "H:MM:SS" or "MM:SS" duration string to seconds.
+    private static func parseDuration(_ str: String) -> Int {
+        let parts = str.split(separator: ":").compactMap { Int($0) }
+        switch parts.count {
+        case 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        case 2: return parts[0] * 60 + parts[1]
+        default: return 0
+        }
+    }
+
     // MARK: - Play URI
 
     /// Set the transport URI and start playback (used for favorites).

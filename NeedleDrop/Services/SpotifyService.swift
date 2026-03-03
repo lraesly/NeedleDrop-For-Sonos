@@ -18,7 +18,7 @@ final class SpotifyService: ObservableObject {
         get { UserDefaults.standard.string(forKey: "spotifyClientId") ?? "" }
         set {
             UserDefaults.standard.set(newValue, forKey: "spotifyClientId")
-            objectWillChange.send()
+            Task { @MainActor in self.objectWillChange.send() }
         }
     }
 
@@ -33,6 +33,27 @@ final class SpotifyService: ObservableObject {
     // MARK: - PKCE State
 
     private var codeVerifier: String?
+
+    // MARK: - Library Cache
+
+    /// Cached Spotify track IDs from the user's Liked Songs.
+    /// Populated on first track change, then updated on each save.
+    private var libraryTrackIds: Set<String> = []
+    private var libraryLoaded = false
+    private var libraryLoadTask: Task<Void, Never>?
+
+    // MARK: - URLSession
+
+    /// Dedicated session with a 15-second timeout for Spotify API calls.
+    /// HTTP caching disabled — responses are transient API data, not worth caching.
+    private static let apiSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: config)
+    }()
 
     // MARK: - Keychain Keys
 
@@ -109,8 +130,127 @@ final class SpotifyService: ObservableObject {
         tokenExpiry = nil
         codeVerifier = nil
         isConnected = false
+        libraryTrackIds.removeAll()
+        libraryLoaded = false
+        libraryLoadTask?.cancel()
+        libraryLoadTask = nil
         deleteTokensFromKeychain()
         log.info("Spotify disconnected")
+    }
+
+    // MARK: - Library Cache
+
+    /// Load the user's saved track IDs into memory (once per session).
+    /// Called on first track change to avoid unnecessary work if Spotify
+    /// is connected but the user never plays anything.
+    func loadLibraryIfNeeded() {
+        guard isConnected, !libraryLoaded, libraryLoadTask == nil else { return }
+
+        libraryLoadTask = Task {
+            do {
+                let ids = try await fetchAllSavedTrackIds()
+                self.libraryTrackIds = ids
+                self.libraryLoaded = true
+                log.info("Spotify library cache loaded: \(ids.count) tracks")
+            } catch {
+                log.warning("Failed to load Spotify library: \(error.localizedDescription)")
+            }
+            self.libraryLoadTask = nil
+        }
+    }
+
+    /// Check if a track is already saved in the user's Spotify library.
+    /// Uses the local cache if loaded, otherwise falls back to the
+    /// /v1/me/tracks/contains endpoint.
+    func isInLibrary(trackId: String) async -> Bool {
+        if libraryLoaded {
+            return libraryTrackIds.contains(trackId)
+        }
+        // Cache not ready — do a lightweight API check
+        do {
+            return try await checkTrackSaved(trackId: trackId)
+        } catch {
+            log.warning("Spotify library check failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Fetch all saved track IDs from the user's Liked Songs (paginated).
+    private func fetchAllSavedTrackIds() async throws -> Set<String> {
+        var ids = Set<String>()
+        var offset = 0
+        let pageSize = 50
+
+        while true {
+            let token = try await validAccessToken()
+            var components = URLComponents(string: "https://api.spotify.com/v1/me/tracks")!
+            components.queryItems = [
+                URLQueryItem(name: "limit", value: String(pageSize)),
+                URLQueryItem(name: "offset", value: String(offset)),
+                URLQueryItem(name: "fields", value: "items(track(id)),total"),
+            ]
+
+            var request = URLRequest(url: components.url!)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await Self.apiSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                log.error("Spotify library fetch failed: HTTP \(statusCode)")
+                throw SpotifyError.httpError(statusCode)
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["items"] as? [[String: Any]] else {
+                break
+            }
+
+            for item in items {
+                if let track = item["track"] as? [String: Any],
+                   let id = track["id"] as? String {
+                    ids.insert(id)
+                }
+            }
+
+            let total = json["total"] as? Int ?? 0
+            offset += pageSize
+            if offset >= total || items.isEmpty {
+                break
+            }
+
+            // Small delay between pages to be polite to the API
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        return ids
+    }
+
+    /// Lightweight single-track check using /v1/me/library/contains (Feb 2026 API).
+    private func checkTrackSaved(trackId: String) async throws -> Bool {
+        let token = try await validAccessToken()
+        var components = URLComponents(string: "https://api.spotify.com/v1/me/library/contains")!
+        components.queryItems = [
+            URLQueryItem(name: "uris", value: "spotify:track:\(trackId)"),
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await Self.apiSession.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            log.error("Spotify contains check failed: HTTP \(statusCode)")
+            throw SpotifyError.httpError(statusCode)
+        }
+
+        guard let results = try JSONSerialization.jsonObject(with: data) as? [Bool],
+              let isSaved = results.first else {
+            return false
+        }
+
+        return isSaved
     }
 
     // MARK: - Token Exchange
@@ -133,7 +273,7 @@ final class SpotifyService: ObservableObject {
         ]
         request.httpBody = body.urlEncoded.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -164,7 +304,7 @@ final class SpotifyService: ObservableObject {
         ]
         request.httpBody = body.urlEncoded.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -182,6 +322,10 @@ final class SpotifyService: ObservableObject {
               let accessToken = json["access_token"] as? String,
               let expiresIn = json["expires_in"] as? Int else {
             throw SpotifyError.invalidTokenResponse
+        }
+
+        if let scope = json["scope"] as? String {
+            log.debug("Spotify token scopes: \(scope)")
         }
 
         self.accessToken = accessToken
@@ -203,6 +347,28 @@ final class SpotifyService: ObservableObject {
             throw SpotifyError.noAccessToken
         }
         return token
+    }
+
+    // MARK: - API: Library Check
+
+    /// Check if a track (by title/artist) is already in the user's Spotify library.
+    /// Searches the catalog first to get the Spotify track ID, then checks the cache.
+    func isInLibrary(title: String, artist: String) async -> Bool {
+        guard isConnected else { return false }
+        do {
+            var track = try await searchTrack(title: title, artist: artist)
+            if track == nil {
+                let cleaned = cleanTitle(title)
+                if cleaned != title {
+                    track = try await searchTrack(title: cleaned, artist: artist)
+                }
+            }
+            guard let found = track else { return false }
+            return await isInLibrary(trackId: found.id)
+        } catch {
+            log.warning("Spotify library check failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     // MARK: - API: Search & Save
@@ -228,6 +394,7 @@ final class SpotifyService: ObservableObject {
             if track == nil {
                 let cleaned = cleanTitle(title)
                 if cleaned != title {
+                    log.debug("Spotify: retrying with cleaned title '\(cleaned)'")
                     track = try await searchTrack(title: cleaned, artist: artist)
                 }
             }
@@ -242,8 +409,23 @@ final class SpotifyService: ObservableObject {
                 )
             }
 
+            // Skip save if already in library (from cache or API check)
+            if await isInLibrary(trackId: found.id) {
+                log.info("Track already in Spotify library: \(found.name) (\(found.id))")
+                return ServiceSaveResult(
+                    service: "spotify",
+                    success: true,
+                    message: "Already in Spotify library",
+                    trackName: found.name,
+                    trackUrl: found.externalURL
+                )
+            }
+
             // Save to library
             try await saveToLibrary(trackId: found.id)
+
+            // Update cache
+            libraryTrackIds.insert(found.id)
 
             return ServiceSaveResult(
                 service: "spotify",
@@ -253,6 +435,7 @@ final class SpotifyService: ObservableObject {
                 trackUrl: found.externalURL
             )
         } catch {
+            log.error("Spotify searchAndSave failed: \(error.localizedDescription)")
             return ServiceSaveResult(
                 service: "spotify",
                 success: false,
@@ -282,10 +465,12 @@ final class SpotifyService: ObservableObject {
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
-            throw SpotifyError.searchFailed
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            log.error("Spotify search failed: HTTP \(statusCode)")
+            throw SpotifyError.httpError(statusCode)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -306,9 +491,11 @@ final class SpotifyService: ObservableObject {
     private func saveToLibrary(trackId: String) async throws {
         let token = try await validAccessToken()
 
-        var components = URLComponents(string: "https://api.spotify.com/v1/me/tracks")!
+        // Feb 2026 API: PUT /v1/me/library with Spotify URIs as query param
+        var components = URLComponents(string: "https://api.spotify.com/v1/me/library")!
+        let uri = "spotify:track:\(trackId)"
         components.queryItems = [
-            URLQueryItem(name: "ids", value: trackId),
+            URLQueryItem(name: "uris", value: uri),
         ]
 
         var request = URLRequest(url: components.url!)
@@ -316,10 +503,12 @@ final class SpotifyService: ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await Self.apiSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
-            throw SpotifyError.saveFailed
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            log.error("Spotify save failed: HTTP \(statusCode)")
+            throw SpotifyError.httpError(statusCode)
         }
     }
 
@@ -426,6 +615,7 @@ final class SpotifyService: ObservableObject {
         case noAccessToken
         case searchFailed
         case saveFailed
+        case httpError(Int)
 
         var errorDescription: String? {
             switch self {
@@ -439,6 +629,7 @@ final class SpotifyService: ObservableObject {
             case .noAccessToken: return "No access token available"
             case .searchFailed: return "Spotify search failed"
             case .saveFailed: return "Could not save track to Spotify library"
+            case .httpError(let code): return "Spotify API error (HTTP \(code))"
             }
         }
     }

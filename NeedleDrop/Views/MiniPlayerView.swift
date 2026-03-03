@@ -11,6 +11,10 @@ import SwiftUI
 ///
 /// **Solid** — always-visible content on a material background; no
 /// hover-driven opacity changes.
+///
+/// Two size modes controlled by `appState.miniPlayerSize`:
+/// - **Compact** (300×120): horizontal layout with small art.
+/// - **Large** (400×320): vertical layout with large centered art.
 struct MiniPlayerView: View {
     @EnvironmentObject var appState: AppState
 
@@ -24,6 +28,14 @@ struct MiniPlayerView: View {
 
     /// Whether the transparent overlay style is active.
     private var transparent: Bool { appState.isMiniPlayerTransparent }
+
+    // MARK: - Size Helpers
+
+    private var isLarge: Bool { appState.miniPlayerSize == .large }
+
+    private var playerWidth: CGFloat { isLarge ? 400 : 300 }
+    private var playerHeight: CGFloat { isLarge ? 385 : 135 }
+    private var artSize: CGFloat { isLarge ? 200 : 56 }
 
     // MARK: - Appearance Helpers
 
@@ -47,10 +59,8 @@ struct MiniPlayerView: View {
                 Color(.windowBackgroundColor)
             }
 
-            VStack(spacing: 8) {
-                if let track = appState.nowPlaying.track, track.isTVAudio {
-                    tvAudioContent(track: track)
-                } else if let track = appState.nowPlaying.track {
+            VStack(spacing: isLarge ? 12 : 8) {
+                if let track = appState.nowPlaying.track {
                     musicContent(
                         track: track,
                         state: appState.nowPlaying.transportState
@@ -62,7 +72,7 @@ struct MiniPlayerView: View {
             .padding(12)
             .opacity(transparent ? (isActive ? 1.0 : 0.12) : 1.0)
         }
-        .frame(width: 300, height: 120)
+        .frame(width: playerWidth, height: playerHeight)
         .onChange(of: appState.miniPlayerFlashCount) { _ in
             guard transparent else { return }
             songChangeTask?.cancel()
@@ -78,42 +88,20 @@ struct MiniPlayerView: View {
     // MARK: - Content Sections
 
     @ViewBuilder
-    private func tvAudioContent(track: TrackInfo) -> some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(placeholderFill)
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: "tv")
-                        .font(.body)
-                        .foregroundStyle(iconColor)
-                        .shadow(color: shadow, radius: 2)
-                }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("TV Audio")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .shadow(color: shadow, radius: 2)
-
-                if let zone = appState.nowPlaying.zoneName {
-                    Text(zone)
-                        .font(.system(size: 11))
-                        .foregroundStyle(subtitleColor)
-                        .shadow(color: shadow, radius: 2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        HStack {
-            Spacer()
-            volumeControl()
+    private func musicContent(track: TrackInfo, state: TransportState) -> some View {
+        if isLarge {
+            largeMusicContent(track: track, state: state)
+        } else {
+            compactMusicContent(track: track, state: state)
         }
     }
 
+    // MARK: - Compact Layout (300×120)
+
     @ViewBuilder
-    private func musicContent(track: TrackInfo, state: TransportState) -> some View {
+    private func compactMusicContent(track: TrackInfo, state: TransportState) -> some View {
+        let isTV = track.isTVAudio
+
         // Top row: art + track info
         HStack(spacing: 10) {
             albumArt(track: track)
@@ -125,54 +113,102 @@ struct MiniPlayerView: View {
                     .shadow(color: shadow, radius: 2)
                     .lineLimit(1)
 
-                Text(track.artist)
+                Text(isTV ? (appState.nowPlaying.zoneName ?? "") : track.artist)
                     .font(.system(size: 11))
                     .foregroundStyle(subtitleColor)
                     .shadow(color: shadow, radius: 2)
                     .lineLimit(1)
 
-                if let album = track.album, !album.isEmpty {
-                    Text(album)
-                        .font(.system(size: 10))
-                        .foregroundStyle(tertiaryColor)
-                        .shadow(color: shadow, radius: 2)
-                        .lineLimit(1)
+                if isTV {
+                    if let zone = appState.activeZone, !zone.members.isEmpty {
+                        Text("\(zone.members.count + 1) speakers")
+                            .font(.system(size: 10))
+                            .foregroundStyle(tertiaryColor)
+                            .shadow(color: shadow, radius: 2)
+                            .lineLimit(1)
+                    }
+                } else {
+                    HStack(spacing: 3) {
+                        if let album = track.album, !album.isEmpty {
+                            Text(album)
+                                .font(.system(size: 10))
+                                .foregroundStyle(tertiaryColor)
+                                .shadow(color: shadow, radius: 2)
+                                .lineLimit(1)
+                                .layoutPriority(-1)
+                        }
+
+                        if appState.scrobbleTracker.isScrobbled(track.id) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.green)
+                                .shadow(color: shadow, radius: 2)
+                                .fixedSize()
+                                .help("Scrobbled")
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
+        // Progress bar (compact: bar only, no timestamps)
+        if !isTV, appState.playbackDuration > 0 {
+            compactProgressBar
+        }
+
         // Bottom row: transport + heart + volume
         HStack(spacing: 12) {
-            Button(action: { appState.previousTrack() }) {
-                Image(systemName: "backward.fill")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.plain)
-
-            Button(action: { appState.togglePlayPause() }) {
-                Image(systemName: state == .playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-
-            Button(action: { appState.nextTrack() }) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.plain)
-
-            if appState.canSaveToLibrary {
-                let isSaved = appState.lastSaveResult?.trackId == track.id
-                    && appState.lastSaveResult?.anySucceeded == true
-
-                Button(action: { appState.saveToLibrary() }) {
-                    Image(systemName: isSaved ? "heart.fill" : "heart")
+            if !isTV {
+                Button(action: { appState.previousTrack() }) {
+                    Image(systemName: "backward.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(isSaved ? .red : iconColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(isSaved)
+            }
+
+            do {
+                let isPlaying = isTV
+                    ? !appState.isTVMuted
+                    : state == .playing
+                Button(action: { appState.togglePlayPause() }) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !isTV {
+                Button(action: { appState.nextTrack() }) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+
+                if !track.isDJSegment {
+                    do {
+                        let isSaved = appState.savedTrackIds.contains(track.id)
+                        let isSaving = appState.savingTrackId == track.id
+                        let canSave = appState.canSaveToLibrary
+
+                        if isSaved {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.red)
+                        } else {
+                            Button(action: { appState.saveToLibrary() }) {
+                                Image(systemName: isSaving ? "heart.fill" : "heart")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(
+                                        isSaving ? .red.opacity(0.4) :
+                                        canSave ? iconColor : iconColor.opacity(0.3)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSaving || !canSave)
+                        }
+                    }
+                }
             }
 
             Spacer()
@@ -182,10 +218,138 @@ struct MiniPlayerView: View {
         .shadow(color: shadow, radius: 2)
     }
 
+    // MARK: - Large Layout (400×320)
+
+    @ViewBuilder
+    private func largeMusicContent(track: TrackInfo, state: TransportState) -> some View {
+        let isTV = track.isTVAudio
+
+        // Large centered album art / TV icon
+        albumArt(track: track)
+
+        // Centered track info
+        VStack(spacing: 2) {
+            Text(track.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(titleColor)
+                .shadow(color: shadow, radius: 2)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+
+            Text(isTV ? (appState.nowPlaying.zoneName ?? "") : track.artist)
+                .font(.system(size: 13))
+                .foregroundStyle(subtitleColor)
+                .shadow(color: shadow, radius: 2)
+                .lineLimit(1)
+
+            if isTV {
+                if let zone = appState.activeZone, !zone.members.isEmpty {
+                    Text("\(zone.members.count + 1) speakers")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tertiaryColor)
+                        .shadow(color: shadow, radius: 2)
+                        .lineLimit(1)
+                }
+            } else {
+                HStack(spacing: 4) {
+                    if let album = track.album, !album.isEmpty {
+                        Text(album)
+                            .font(.system(size: 11))
+                            .foregroundStyle(tertiaryColor)
+                            .shadow(color: shadow, radius: 2)
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                    }
+
+                    if appState.scrobbleTracker.isScrobbled(track.id) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.green)
+                            .shadow(color: shadow, radius: 2)
+                            .fixedSize()
+                            .help("Scrobbled")
+                    }
+                }
+            }
+        }
+
+        // Progress bar (large: with timestamps)
+        if !isTV {
+            PlaybackProgressBar(
+                position: appState.playbackPosition,
+                duration: appState.playbackDuration,
+                trackColor: transparent ? .white.opacity(0.15) : Color.secondary.opacity(0.2),
+                fillColor: transparent ? .white.opacity(0.6) : Color.accentColor,
+                timeColor: tertiaryColor
+            )
+            .shadow(color: shadow, radius: 2)
+        }
+
+        // Transport controls + heart
+        HStack(spacing: 16) {
+            if !isTV {
+                Button(action: { appState.previousTrack() }) {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+            }
+
+            do {
+                let isPlaying = isTV
+                    ? !appState.isTVMuted
+                    : state == .playing
+                Button(action: { appState.togglePlayPause() }) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 20))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !isTV {
+                Button(action: { appState.nextTrack() }) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+
+                if !track.isDJSegment {
+                    do {
+                        let isSaved = appState.savedTrackIds.contains(track.id)
+                        let isSaving = appState.savingTrackId == track.id
+                        let canSave = appState.canSaveToLibrary
+
+                        if isSaved {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.red)
+                        } else {
+                            Button(action: { appState.saveToLibrary() }) {
+                                Image(systemName: isSaving ? "heart.fill" : "heart")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(
+                                        isSaving ? .red.opacity(0.4) :
+                                        canSave ? iconColor : iconColor.opacity(0.3)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSaving || !canSave)
+                        }
+                    }
+                }
+            }
+        }
+        .foregroundStyle(transportColor)
+        .shadow(color: shadow, radius: 2)
+
+        // Full-width volume slider
+        volumeControl()
+    }
+
     private var emptyContent: some View {
         VStack(spacing: 6) {
             Image(systemName: "music.note")
-                .font(.system(size: 20))
+                .font(.system(size: isLarge ? 28 : 20))
                 .foregroundStyle(dimColor)
                 .shadow(color: shadow, radius: 2)
             Text("Nothing playing")
@@ -200,7 +364,14 @@ struct MiniPlayerView: View {
 
     @ViewBuilder
     private func albumArt(track: TrackInfo) -> some View {
-        if let url = track.albumArtURL {
+        if track.isTVAudio {
+            Image("TVIcon")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: artSize * 0.85, height: artSize * 0.85)
+                .frame(width: artSize, height: artSize)
+                .opacity(transparent ? 0.85 : 1.0)
+        } else if let url = track.albumArtURL {
             CachedAsyncImage(url: url) { image in
                 image
                     .resizable()
@@ -208,21 +379,25 @@ struct MiniPlayerView: View {
             } placeholder: {
                 artPlaceholder
             }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .shadow(color: .black.opacity(0.4), radius: 4)
+            .frame(width: artSize, height: artSize)
+            .clipShape(RoundedRectangle(cornerRadius: isLarge ? 10 : 6))
+            .shadow(color: .black.opacity(0.4), radius: isLarge ? 8 : 4)
+            .onTapGesture {
+                appState.albumArtWindow.show(url: url)
+            }
+            .help("Click to enlarge")
         } else {
             artPlaceholder
         }
     }
 
     private var artPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: isLarge ? 10 : 6)
             .fill(placeholderFill)
-            .frame(width: 56, height: 56)
+            .frame(width: artSize, height: artSize)
             .overlay {
                 Image(systemName: "music.note")
-                    .font(.body)
+                    .font(isLarge ? .title : .body)
                     .foregroundStyle(dimColor)
             }
     }
@@ -241,19 +416,73 @@ struct MiniPlayerView: View {
             .buttonStyle(.plain)
             .help(appState.volume == 0 ? "Unmute" : "Mute")
 
-            Slider(
-                value: Binding(
-                    get: { Double(appState.volume) },
-                    set: { newValue in
-                        appState.setVolume(Int(newValue))
-                    }
-                ),
-                in: 0...100,
-                step: 1
-            )
-            .frame(width: 70)
-            .controlSize(.mini)
+            customVolumeSlider
         }
+    }
+
+    /// Custom volume slider that renders as a single rounded track.
+    private var customVolumeSlider: some View {
+        let sliderWidth: CGFloat = isLarge ? 280 : 70
+        let trackHeight: CGFloat = isLarge ? 4 : 3
+        let thumbSize: CGFloat = isLarge ? 12 : 8
+
+        return GeometryReader { geometry in
+            let width = geometry.size.width
+            let ratio = CGFloat(appState.volume) / 100.0
+
+            ZStack(alignment: .leading) {
+                // Single track background
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(transparent ? Color.white.opacity(0.15) : Color.secondary.opacity(0.25))
+                    .frame(height: trackHeight)
+
+                // Fill
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(transparent ? Color.white.opacity(0.5) : Color.accentColor)
+                    .frame(width: ratio * width, height: trackHeight)
+
+                // Thumb
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                    .offset(x: ratio * (width - thumbSize))
+            }
+            .frame(height: thumbSize)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let newRatio = max(0, min(value.location.x / width, 1.0))
+                        appState.setVolume(Int(newRatio * 100))
+                    }
+            )
+        }
+        .frame(width: sliderWidth, height: thumbSize)
+    }
+
+    // MARK: - Compact Progress Bar
+
+    /// Minimal progress bar for compact layout — just the bar, no timestamps.
+    private var compactProgressBar: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(transparent ? Color.white.opacity(0.15) : Color.secondary.opacity(0.2))
+                    .frame(height: 2)
+
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(transparent ? Color.white.opacity(0.5) : Color.accentColor)
+                    .frame(
+                        width: appState.playbackDuration > 0
+                            ? min(CGFloat(appState.playbackPosition) / CGFloat(appState.playbackDuration), 1.0) * geometry.size.width
+                            : 0,
+                        height: 2
+                    )
+            }
+        }
+        .frame(height: 2)
+        .shadow(color: shadow, radius: 2)
     }
 
     // MARK: - Helpers

@@ -58,65 +58,106 @@ final class SonosZoneManager {
         }
     }
 
-    // MARK: - Favorites
+    // MARK: - Transport Info
 
-    /// Fetch Sonos favorites via ContentDirectory Browse (ObjectID=FV:2).
-    func getFavorites(device: UPnPDevice) async -> [FavoriteItem] {
-        // Services may not be loaded yet — retry with delay
-        var service: ContentDirectory1Service?
-        for attempt in 1...10 {
-            service = device.services.first(where: {
-                $0.serviceType == "urn:schemas-upnp-org:service:ContentDirectory:1"
-            }) as? ContentDirectory1Service
-            if service != nil { break }
-            log.info("ContentDirectory not yet available (attempt \(attempt)/10), waiting...")
-            try? await Task.sleep(for: .seconds(1))
-        }
-        guard let service else {
-            log.error("No ContentDirectory service on device \(device.uuid) after retries")
-            return []
-        }
+    /// Query the current transport state of a zone coordinator.
+    ///
+    /// Sends a GetTransportInfo SOAP request to the speaker's AVTransport service.
+    /// Returns the transport state string (e.g. "PLAYING", "PAUSED_PLAYBACK", "STOPPED").
+    func getTransportState(speakerIP: String) async -> String? {
+        let url = URL(string: "http://\(speakerIP):1400/MediaRenderer/AVTransport/Control")!
+
+        let soapBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+          <s:Body>
+            <u:GetTransportInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+              <InstanceID>0</InstanceID>
+            </u:GetTransportInfo>
+          </s:Body>
+        </s:Envelope>
+        """
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = soapBody.data(using: .utf8)
+        request.setValue("text/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            "\"urn:schemas-upnp-org:service:AVTransport:1#GetTransportInfo\"",
+            forHTTPHeaderField: "SOAPAction"
+        )
+        request.timeoutInterval = 3
 
         do {
-            let response = try await service.browseDIDL(
-                objectID: "FV:2",
-                browseFlag: .browseDirectChildren,
-                filter: "*",
-                startingIndex: 0,
-                requestedCount: 100,
-                sortCriteria: ""
-            )
-
-            let speakerIP = device.url.host ?? ""
-            let favorites = response.item.compactMap { item -> FavoriteItem? in
-                // Get playable URI from the res elements
-                guard let uri = item.res.first?.value.absoluteString else { return nil }
-
-                // Resolve album art URI
-                let artURL: String?
-                if let art = item.albumArtURI.first {
-                    let artStr = art.absoluteString
-                    if artStr.hasPrefix("http") {
-                        artURL = artStr
-                    } else {
-                        artURL = "http://\(speakerIP):1400\(artStr)"
-                    }
-                } else {
-                    artURL = nil
-                }
-
-                // Build the resource metadata XML for playback.
-                // The desc element contains the DIDL metadata needed by SetAVTransportURI.
-                let meta = item.desc.first?.value ?? ""
-
-                return FavoriteItem(
-                    title: item.title,
-                    uri: uri,
-                    meta: meta,
-                    albumArtUri: artURL
-                )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                return nil
             }
 
+            // Parse <CurrentTransportState> from the SOAP response
+            let parser = TransportInfoParser(data: data)
+            return parser.parse()
+        } catch {
+            log.debug("GetTransportInfo failed for \(speakerIP): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - Favorites
+
+    /// Fetch Sonos favorites via raw SOAP Browse (ObjectID=FV:2).
+    ///
+    /// Uses direct SOAP instead of SwiftUPnP's ContentDirectory service
+    /// to avoid dependency on UPnP device loading.
+    func getFavorites(speakerIP: String) async -> [FavoriteItem] {
+        let url = URL(string: "http://\(speakerIP):1400/MediaServer/ContentDirectory/Control")!
+
+        let soapBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+          <s:Body>
+            <u:Browse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1">
+              <ObjectID>FV:2</ObjectID>
+              <BrowseFlag>BrowseDirectChildren</BrowseFlag>
+              <Filter>*</Filter>
+              <StartingIndex>0</StartingIndex>
+              <RequestedCount>100</RequestedCount>
+              <SortCriteria></SortCriteria>
+            </u:Browse>
+          </s:Body>
+        </s:Envelope>
+        """
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = soapBody.data(using: .utf8)
+        request.setValue("text/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"",
+            forHTTPHeaderField: "SOAPAction"
+        )
+        request.timeoutInterval = 5
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                log.error("Favorites browse request failed")
+                return []
+            }
+
+            // Extract the <Result> element from the SOAP response
+            let extractor = SOAPElementExtractor(data: data, elementName: "Result")
+            guard let didlXML = extractor.extract(), !didlXML.isEmpty else {
+                log.error("No Result element in favorites browse response")
+                return []
+            }
+
+            // Parse the DIDL-Lite XML into favorites
+            let favorites = FavoritesDIDLParser.parse(didlXML, speakerIP: speakerIP)
             log.info("Fetched \(favorites.count) favorite(s)")
             return favorites
         } catch {
@@ -127,35 +168,47 @@ final class SonosZoneManager {
 
     // MARK: - Speaker Grouping
 
-    /// Join a speaker to a coordinator's group.
+    /// Join a speaker to a coordinator's group using direct SOAP.
     ///
     /// Sets the speaker's AVTransport URI to `x-rincon:{coordinatorUUID}`,
     /// which makes it play audio from the coordinator's group.
-    func joinSpeaker(speaker: UPnPDevice, toCoordinator coordinator: SonosDevice) async {
-        // Services may not be loaded yet — retry with delay
-        var service: AVTransport1Service?
-        for attempt in 1...5 {
-            service = speaker.services.first(where: {
-                $0.serviceType == "urn:schemas-upnp-org:service:AVTransport:1"
-            }) as? AVTransport1Service
-            if service != nil { break }
-            if attempt < 5 {
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-        guard let service else {
-            log.error("No AVTransport service on speaker after retries")
-            return
-        }
+    /// Uses SOAP directly so it works regardless of SSDP discovery state.
+    func joinSpeaker(speakerIP: String, toCoordinatorUUID coordinatorUUID: String) async {
+        let url = URL(string: "http://\(speakerIP):1400/MediaRenderer/AVTransport/Control")!
+        let rinconURI = "x-rincon:\(coordinatorUUID)"
 
-        let rinconURI = "x-rincon:\(coordinator.uuid)"
+        let soapBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+          <s:Body>
+            <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+              <InstanceID>0</InstanceID>
+              <CurrentURI>\(rinconURI)</CurrentURI>
+              <CurrentURIMetaData></CurrentURIMetaData>
+            </u:SetAVTransportURI>
+          </s:Body>
+        </s:Envelope>
+        """
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = soapBody.data(using: .utf8)
+        request.setValue("text/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            "\"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI\"",
+            forHTTPHeaderField: "SOAPAction"
+        )
+        request.timeoutInterval = 5
+
         do {
-            try await service.setAVTransportURI(
-                instanceID: 0,
-                currentURI: rinconURI,
-                currentURIMetaData: ""
-            )
-            log.info("Joined speaker to \(coordinator.roomName)")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                log.error("Join SOAP request failed")
+                return
+            }
+            log.info("Joined speaker at \(speakerIP) to coordinator \(coordinatorUUID)")
         } catch {
             log.error("Join failed: \(error.localizedDescription)")
         }
@@ -254,10 +307,16 @@ private class ZoneGroupTopologyParser: NSObject, XMLParserDelegate {
         if element == "ZoneGroup" {
             currentCoordinatorUUID = attributes["Coordinator"]
             currentMembers = []
-        } else if element == "ZoneGroupMember" {
+        } else if element == "ZoneGroupMember" || element == "Satellite" {
             guard let uuid = attributes["UUID"],
                   let zoneName = attributes["ZoneName"],
                   let location = attributes["Location"] else { return }
+
+            // Skip invisible/bonded speakers (Sub, surround speakers, etc.)
+            // These can't be independently grouped.
+            if attributes["Invisible"] == "1" || element == "Satellite" {
+                return
+            }
 
             // Extract IP from Location URL (e.g., "http://192.168.1.10:1400/xml/...")
             let ip = URL(string: location)?.host ?? ""
@@ -322,6 +381,177 @@ private class ZoneGroupStateExtractor: NSObject, XMLParserDelegate {
                 namespaceURI: String?, qualifiedName: String?) {
         if element == "ZoneGroupState" {
             zoneGroupState = currentText
+        }
+    }
+}
+
+/// Parses the GetTransportInfo SOAP response to extract CurrentTransportState.
+private class TransportInfoParser: NSObject, XMLParserDelegate {
+    private let data: Data
+    private var currentElement = ""
+    private var currentText = ""
+    private var transportState: String?
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    func parse() -> String? {
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.shouldProcessNamespaces = false
+        parser.parse()
+        return transportState
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String,
+                namespaceURI: String?, qualifiedName: String?,
+                attributes: [String: String] = [:]) {
+        currentElement = element
+        currentText = ""
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String,
+                namespaceURI: String?, qualifiedName: String?) {
+        if element == "CurrentTransportState" {
+            transportState = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+}
+
+/// Extracts a single named element's text content from a SOAP response.
+private class SOAPElementExtractor: NSObject, XMLParserDelegate {
+    private let data: Data
+    private let elementName: String
+    private var currentElement = ""
+    private var currentText = ""
+    private var result: String?
+
+    init(data: Data, elementName: String) {
+        self.data = data
+        self.elementName = elementName
+    }
+
+    func extract() -> String? {
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.shouldProcessNamespaces = false
+        parser.parse()
+        return result
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String,
+                namespaceURI: String?, qualifiedName: String?,
+                attributes: [String: String] = [:]) {
+        currentElement = element
+        if element == elementName { currentText = "" }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if currentElement == elementName { currentText += string }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String,
+                namespaceURI: String?, qualifiedName: String?) {
+        if element == elementName {
+            result = currentText
+        }
+    }
+}
+
+/// Parses DIDL-Lite XML from a ContentDirectory Browse response into FavoriteItem array.
+///
+/// Each `<item>` contains:
+/// - `<dc:title>` — display title
+/// - `<res>` — playable URI
+/// - `<r:resMD>` — metadata XML for SetAVTransportURI
+/// - `<upnp:albumArtURI>` — album art (may be relative)
+private class FavoritesDIDLParser: NSObject, XMLParserDelegate {
+    private var favorites: [FavoriteItem] = []
+    private var speakerIP: String
+    private var inItem = false
+    private var currentElement = ""
+    private var currentText = ""
+
+    // Per-item state
+    private var itemTitle = ""
+    private var itemURI = ""
+    private var itemMeta = ""
+    private var itemArtURI: String?
+
+    init(speakerIP: String) {
+        self.speakerIP = speakerIP
+    }
+
+    static func parse(_ xml: String, speakerIP: String) -> [FavoriteItem] {
+        guard let data = xml.data(using: .utf8) else { return [] }
+        let handler = FavoritesDIDLParser(speakerIP: speakerIP)
+        let parser = XMLParser(data: data)
+        parser.delegate = handler
+        parser.shouldProcessNamespaces = true
+        parser.parse()
+        return handler.favorites
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String,
+                namespaceURI: String?, qualifiedName: String?,
+                attributes: [String: String] = [:]) {
+        if element == "item" {
+            inItem = true
+            itemTitle = ""
+            itemURI = ""
+            itemMeta = ""
+            itemArtURI = nil
+        }
+        currentElement = element
+        currentText = ""
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String,
+                namespaceURI: String?, qualifiedName: String?) {
+        guard inItem else { return }
+        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch element {
+        case "title":
+            if !text.isEmpty { itemTitle = text }
+        case "res":
+            if !text.isEmpty && itemURI.isEmpty { itemURI = text }
+        case "resMD":
+            if !text.isEmpty { itemMeta = text }
+        case "albumArtURI":
+            if !text.isEmpty { itemArtURI = text }
+        case "item":
+            // End of item — emit favorite if we have title + URI
+            if !itemTitle.isEmpty && !itemURI.isEmpty {
+                // Resolve album art URI
+                var resolvedArt: String?
+                if let art = itemArtURI {
+                    if art.hasPrefix("http") {
+                        resolvedArt = art
+                    } else {
+                        resolvedArt = "http://\(speakerIP):1400\(art.hasPrefix("/") ? art : "/\(art)")"
+                    }
+                }
+
+                favorites.append(FavoriteItem(
+                    title: itemTitle,
+                    uri: itemURI,
+                    meta: itemMeta,
+                    albumArtUri: resolvedArt
+                ))
+            }
+            inItem = false
+        default:
+            break
         }
     }
 }

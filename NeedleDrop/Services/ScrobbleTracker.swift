@@ -20,6 +20,8 @@ final class ScrobbleTracker: ObservableObject {
     var thresholdPercent: Double = 50.0
     /// Fixed minimum seconds for radio/streaming without duration. Default: 30s.
     var minSeconds: TimeInterval = 30
+    /// Maximum seconds before scrobble (caps percentage-based threshold). Default: 4 min.
+    var maxSeconds: TimeInterval = 240
 
     // MARK: - Internal State
 
@@ -57,6 +59,21 @@ final class ScrobbleTracker: ObservableObject {
     /// Check if a given track has been scrobbled.
     func isScrobbled(_ trackId: String) -> Bool {
         scrobbledTrackIds.contains(trackId)
+    }
+
+    /// Seed the tracker with the current playback position (from GetPositionInfo).
+    /// If the position is already past the scrobble threshold, immediately mark
+    /// the track as scrobbled. Handles the case where the app starts while a
+    /// song is already well into playback.
+    func seedPosition(_ positionSeconds: Int) {
+        guard let trackId = currentTrackId else { return }
+        guard !scrobbledTrackIds.contains(trackId) else { return }
+
+        let position = TimeInterval(positionSeconds)
+        if position >= threshold {
+            scrobbledTrackIds.insert(trackId)
+            log.info("Seeded scrobble from position: \(trackId) (position \(positionSeconds)s >= threshold \(Int(self.threshold))s)")
+        }
     }
 
     // MARK: - Private
@@ -102,7 +119,7 @@ final class ScrobbleTracker: ObservableObject {
 
     private var threshold: TimeInterval {
         if trackDuration > 0 {
-            return trackDuration * thresholdPercent / 100.0
+            return min(trackDuration * thresholdPercent / 100.0, maxSeconds)
         } else {
             return minSeconds
         }

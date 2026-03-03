@@ -2,14 +2,16 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
+    @State private var showSetup = false
+    @State private var setupTab = 0
 
     var body: some View {
         VStack(spacing: 0) {
             // Header: connection status + zone picker
             HStack {
-                ConnectionStatusView()
+                ZonePillButton()
                 Spacer()
-                ZonePickerView()
+                MusicMenuButton()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -20,117 +22,16 @@ struct MenuBarView: View {
             // Content
             if appState.speakers.isEmpty {
                 SonosSetupView()
+            } else if showSetup {
+                setupContent
             } else {
-                VStack(spacing: 0) {
-                    // Now playing + controls
-                    NowPlayingView()
-
-                    // Favorites + Presets
-                    if !appState.favorites.isEmpty || !appState.presetStore.presets.isEmpty {
-                        Divider()
-
-                        HStack {
-                            if !appState.favorites.isEmpty {
-                                FavoritesView()
-                            }
-                            if !appState.presetStore.presets.isEmpty || !appState.favorites.isEmpty {
-                                PresetsView()
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-
-            // Services (collapsible)
-            if !appState.speakers.isEmpty {
-                Divider()
-
-                DisclosureGroup {
-                    LibraryServicesView()
-
-                    Divider().padding(.vertical, 4)
-
-                    Text("Scrobbler")
-                        .font(.caption)
-                        .foregroundColor(.secondary.opacity(0.7))
-                        .textCase(.uppercase)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 4)
-                        .padding(.bottom, 2)
-
-                    ScrobblerConfigView()
-
-                    if appState.scrobblerClient.config != nil {
-                        ScrobbleFiltersView()
-                    }
-                } label: {
-                    Text("Services")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                mainContent
             }
 
             Divider()
 
-            // Footer: mini player toggle, banner toggle, quit
-            HStack(spacing: 12) {
-                if !appState.speakers.isEmpty {
-                    Button {
-                        appState.toggleMiniPlayer()
-                    } label: {
-                        Image(systemName: appState.isMiniPlayerVisible
-                              ? "pip.fill" : "pip")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .help(appState.isMiniPlayerVisible ? "Hide Mini Player" : "Show Mini Player")
-
-                    Button {
-                        appState.isBannerEnabled.toggle()
-                    } label: {
-                        Image(systemName: appState.isBannerEnabled
-                              ? "bell.fill" : "bell.slash")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .help(appState.isBannerEnabled ? "Disable Track Banners" : "Enable Track Banners")
-
-                    if appState.isMiniPlayerVisible {
-                        Button {
-                            appState.isMiniPlayerTransparent.toggle()
-                        } label: {
-                            Image(systemName: appState.isMiniPlayerTransparent
-                                  ? "sun.max" : "sun.max.fill")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
-                        .help(appState.isMiniPlayerTransparent ? "Solid Mode" : "Transparent Mode")
-                    }
-                }
-
-                Spacer()
-
-                Text("NeedleDrop v2")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            // Footer
+            footer
         }
         .popover(isPresented: Binding(
             get: { appState.presetNav != nil },
@@ -139,6 +40,131 @@ struct MenuBarView: View {
             presetPopoverContent
         }
     }
+
+    // MARK: - Main Content
+
+    @ViewBuilder
+    private var mainContent: some View {
+        NowPlayingView()
+    }
+
+    // MARK: - Setup Content
+
+    @ViewBuilder
+    private var setupContent: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $setupTab) {
+                Text("Speaker").tag(0)
+                Text("Scrobbling").tag(1)
+                Text("Services").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            ScrollView {
+                switch setupTab {
+                case 0:
+                    SpeakerSettingsView()
+                case 1:
+                    scrobblingTab
+                case 2:
+                    LibraryServicesView()
+                default:
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var scrobblingTab: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Scrobbler")
+                .font(.caption)
+                .foregroundColor(.secondary.opacity(0.7))
+                .textCase(.uppercase)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+
+            ScrobblerConfigView()
+
+            if appState.scrobblerClient.config != nil {
+                Divider().padding(.vertical, 4)
+                ScrobbleFiltersView()
+            }
+        }
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - Footer
+
+    @ViewBuilder
+    private var footer: some View {
+        HStack(spacing: 12) {
+            if !appState.speakers.isEmpty {
+                // Mini player toggle
+                Button {
+                    appState.toggleMiniPlayer()
+                } label: {
+                    Image(systemName: appState.isMiniPlayerVisible
+                          ? "pip.fill" : "pip")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help(appState.isMiniPlayerVisible ? "Hide Mini Player" : "Show Mini Player")
+
+                // Banner toggle
+                Button {
+                    appState.isBannerEnabled.toggle()
+                } label: {
+                    Image(systemName: appState.isBannerEnabled
+                          ? "bell.fill" : "bell.slash")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help(appState.isBannerEnabled ? "Song change popups: On" : "Song change popups: Off")
+
+                // Setup toggle (gear icon / "Done" text)
+                Button {
+                    showSetup.toggle()
+                    if !showSetup { setupTab = 0 }
+                } label: {
+                    if showSetup {
+                        Text("Done")
+                            .font(.caption)
+                    } else {
+                        Image(systemName: "gearshape")
+                            .font(.caption)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(showSetup ? .accentColor : .secondary)
+                .help(showSetup ? "Close Setup" : "Setup")
+            }
+
+            Spacer()
+
+            Text("NeedleDrop v2")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+            .buttonStyle(.plain)
+            .font(.caption2)
+            .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - Preset Popover
 
     @ViewBuilder
     private var presetPopoverContent: some View {

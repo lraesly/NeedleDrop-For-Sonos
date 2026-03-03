@@ -12,7 +12,13 @@ final class ScrobblerClient: ObservableObject {
     @Published var config: ScrobblerConfig?
     @Published var isSearching = false
 
-    private var browser: NWBrowser?
+    /// NetServiceBrowser-based discovery (reliable TXT record delivery).
+    private var serviceBrowser: NetServiceBrowser?
+    private var browserDelegate: BonjourBrowserDelegate?
+    /// Keep the discovered service alive during resolution.
+    private var resolvingService: NetService?
+    private var resolveDelegate: BonjourResolveDelegate?
+    private var isResolving = false
 
     // MARK: - Bonjour Discovery
 
@@ -20,34 +26,18 @@ final class ScrobblerClient: ObservableObject {
     func discoverScrobbler() {
         isSearching = true
 
-        let params = NWParameters()
-        params.includePeerToPeer = true
-
-        let browser = NWBrowser(for: .bonjour(type: "_needledrop._tcp", domain: nil), using: params)
-        self.browser = browser
-
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                for result in results {
-                    if case let .service(name, type, domain, _) = result.endpoint {
-                        log.info("Found scrobbler: \(name) (\(type) in \(domain))")
-                        // Resolve the service to get host/port/TXT
-                        self.resolveService(result)
-                    }
-                }
+        let delegate = BonjourBrowserDelegate { [weak self] service in
+            Task { @MainActor in
+                self?.handleFoundService(service)
             }
         }
+        self.browserDelegate = delegate
 
-        browser.stateUpdateHandler = { [weak self] state in
-            if case .failed = state {
-                Task { @MainActor in
-                    self?.isSearching = false
-                }
-            }
-        }
+        let browser = NetServiceBrowser()
+        browser.delegate = delegate
+        self.serviceBrowser = browser
 
-        browser.start(queue: .main)
+        browser.searchForServices(ofType: "_needledrop._tcp.", inDomain: "")
 
         // Stop searching after 10 seconds
         Task {
@@ -57,52 +47,121 @@ final class ScrobblerClient: ObservableObject {
     }
 
     func stopDiscovery() {
-        browser?.cancel()
-        browser = nil
+        serviceBrowser?.stop()
+        serviceBrowser = nil
+        browserDelegate = nil
+        resolvingService = nil
+        resolveDelegate = nil
         isSearching = false
+        isResolving = false
     }
 
-    private func resolveService(_ result: NWBrowser.Result) {
-        let connection = NWConnection(to: result.endpoint, using: .tcp)
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                if let endpoint = connection.currentPath?.remoteEndpoint,
-                   case let .hostPort(host, port) = endpoint {
-                    // Clean the host string — remove interface suffix (e.g., "%en0")
-                    // and handle IPv6 addresses properly
-                    var hostStr = "\(host)"
-                    if let percentIndex = hostStr.firstIndex(of: "%") {
-                        hostStr = String(hostStr[..<percentIndex])
-                    }
-                    let portNum = Int(port.rawValue)
-                    Task { @MainActor in
-                        var name = "Scrobbler"
-                        if case let .service(serviceName, _, _, _) = result.endpoint {
-                            name = serviceName
-                        }
-                        let config = ScrobblerConfig(
-                            host: hostStr,
-                            port: portNum,
-                            token: "",
-                            name: name
-                        )
-                        self?.config = config
-                        self?.persistConfig()
-                        self?.isSearching = false
-                        self?.stopDiscovery()
-                        log.info("Resolved scrobbler: \(name) at \(hostStr):\(portNum)")
-                    }
+    private func handleFoundService(_ service: NetService) {
+        guard config == nil, !isResolving else { return }
+        isResolving = true
+        log.info("Found scrobbler: \(service.name)")
+
+        // Keep the service alive and resolve it to get address + TXT record
+        self.resolvingService = service
+
+        let delegate = BonjourResolveDelegate(
+            onResolved: { [weak self] resolvedService in
+                Task { @MainActor in
+                    self?.handleResolvedService(resolvedService)
                 }
-                connection.cancel()
-            case .failed(let error):
-                log.error("Service resolution failed: \(error.localizedDescription)")
-                connection.cancel()
-            default:
-                break
+            },
+            onError: { [weak self] errorDict in
+                Task { @MainActor in
+                    log.warning("Service resolution failed: \(errorDict)")
+                    self?.isResolving = false
+                    self?.resolvingService = nil
+                    self?.resolveDelegate = nil
+                }
+            }
+        )
+        self.resolveDelegate = delegate
+        service.delegate = delegate
+        service.resolve(withTimeout: 5)
+    }
+
+    private func handleResolvedService(_ service: NetService) {
+        // Extract IP from resolved addresses
+        guard let addresses = service.addresses, !addresses.isEmpty else {
+            log.warning("Service resolved but no addresses found")
+            isResolving = false
+            return
+        }
+
+        var hostStr: String?
+        for addressData in addresses {
+            addressData.withUnsafeBytes { rawBuffer in
+                guard let baseAddress = rawBuffer.baseAddress else { return }
+                let family = baseAddress.assumingMemoryBound(to: sockaddr.self).pointee.sa_family
+                if family == sa_family_t(AF_INET) {
+                    let sockaddrIn = baseAddress.assumingMemoryBound(to: sockaddr_in.self).pointee
+                    var addr = sockaddrIn.sin_addr
+                    var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                    inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN))
+                    hostStr = String(cString: buffer)
+                }
+            }
+            if hostStr != nil { break }
+        }
+
+        guard let host = hostStr else {
+            log.warning("Could not extract IPv4 address from resolved service")
+            isResolving = false
+            return
+        }
+
+        let port = service.port
+
+        // Extract token from TXT record — this is the key advantage of NetService
+        // over NWBrowser, which never delivers .bonjour(txtRecord) metadata.
+        var token = ""
+        if let txtData = service.txtRecordData() {
+            let txtDict = NetService.dictionary(fromTXTRecord: txtData)
+            if let tokenData = txtDict["token"],
+               let tokenStr = String(data: tokenData, encoding: .utf8) {
+                token = tokenStr
             }
         }
-        connection.start(queue: .global(qos: .userInitiated))
+
+        if token.isEmpty {
+            log.info("Resolved \(service.name) at \(host):\(port) — no auth token in TXT record")
+        } else {
+            log.info("Resolved \(service.name) at \(host):\(port) — auth token present")
+        }
+
+        let newConfig = ScrobblerConfig(
+            host: host,
+            port: port,
+            token: token,
+            name: service.name
+        )
+        self.config = newConfig
+
+        // Verify the endpoint actually responds
+        Task { @MainActor in
+            do {
+                let reachable = try await self.getStatus()
+                if reachable {
+                    self.persistConfig()
+                    self.isSearching = false
+                    self.isResolving = false
+                    self.stopDiscovery()
+                    log.info("Verified scrobbler: \(service.name) at \(host):\(port)")
+                } else {
+                    log.warning("Resolved \(host):\(port) but status check returned false")
+                    self.config = nil
+                    self.isResolving = false
+                }
+            } catch {
+                log.warning("Resolved \(host):\(port) not reachable: \(error.localizedDescription)")
+                self.config = nil
+                self.isResolving = false
+            }
+        }
     }
 
     /// Manually set scrobbler config (for when discovery already happened).
@@ -129,6 +188,18 @@ final class ScrobblerClient: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "scrobblerConfig"),
            let saved = try? JSONDecoder().decode(ScrobblerConfig.self, from: data) {
             self.config = saved
+
+            // Verify the cached config is still reachable; if not, auto-discover
+            Task { @MainActor in
+                do {
+                    _ = try await getStatus()
+                    log.info("Scrobbler at \(saved.host):\(saved.port) is reachable")
+                } catch {
+                    log.warning("Cached scrobbler at \(saved.host):\(saved.port) unreachable — auto-discovering")
+                    self.config = nil
+                    self.discoverScrobbler()
+                }
+            }
         }
     }
 
@@ -266,3 +337,43 @@ final class ScrobblerClient: ObservableObject {
     }
 }
 
+// MARK: - NetServiceBrowser Delegate
+
+/// Delegate for NetServiceBrowser that forwards discovered services via closure.
+private class BonjourBrowserDelegate: NSObject, NetServiceBrowserDelegate {
+    let onFound: (NetService) -> Void
+
+    init(onFound: @escaping (NetService) -> Void) {
+        self.onFound = onFound
+    }
+
+    func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+        onFound(service)
+    }
+
+    func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
+        let log = Logger(subsystem: "com.needledrop", category: "ScrobblerClient")
+        log.warning("NetServiceBrowser search failed: \(errorDict)")
+    }
+}
+
+// MARK: - NetService Resolve Delegate
+
+/// Delegate for NetService resolution that delivers address + TXT record via closure.
+private class BonjourResolveDelegate: NSObject, NetServiceDelegate {
+    let onResolved: (NetService) -> Void
+    let onError: ([String: NSNumber]) -> Void
+
+    init(onResolved: @escaping (NetService) -> Void, onError: @escaping ([String: NSNumber]) -> Void) {
+        self.onResolved = onResolved
+        self.onError = onError
+    }
+
+    func netServiceDidResolveAddress(_ sender: NetService) {
+        onResolved(sender)
+    }
+
+    func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+        onError(errorDict)
+    }
+}

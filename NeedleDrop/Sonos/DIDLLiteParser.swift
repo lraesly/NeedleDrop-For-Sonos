@@ -108,10 +108,22 @@ extension DIDLLiteMetadata {
     /// Handles two formats:
     /// 1. SiriusXM pipe-delimited: `"TYPE=SNG|TITLE Song Name|ARTIST Artist Name|ALBUM Album"`
     /// 2. Simple radio: `"Artist - Title"`
+    ///
+    /// The `type` field captures the SiriusXM TYPE value (e.g., "SNG" for songs).
+    /// Non-song types (DJ segments, ads) should be treated differently by callers.
     struct StreamContentInfo: Equatable {
         var artist: String?
         var title: String?
         var album: String?
+        /// SiriusXM stream content type: "SNG" = song, anything else = non-music (DJ, ad, etc.).
+        /// Nil for non-SiriusXM streams.
+        var type: String?
+
+        /// Whether this is a non-music segment (DJ talk, ad break, etc.).
+        var isDJOrNonMusic: Bool {
+            guard let type else { return false }
+            return type != "SNG"
+        }
     }
 
     /// Extract artist/title from `streamContent` if present.
@@ -136,6 +148,8 @@ extension DIDLLiteMetadata {
                     if album != "undefined" {
                         info.album = album
                     }
+                } else if trimmed.hasPrefix("TYPE=") {
+                    info.type = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                 }
             }
         } else if content.contains(" - ") {
@@ -154,15 +168,27 @@ extension DIDLLiteMetadata {
 // MARK: - Sonos Internal String Filter
 
 extension DIDLLiteMetadata {
-    /// Check if a metadata string is a Sonos internal identifier (not user-facing).
+    /// Check if a metadata string is a Sonos internal identifier or stream artifact (not user-facing).
     ///
-    /// Matches: `x-*`, `zp*`, `rincon_*`, or anything with `://` in it.
+    /// Matches: `x-*`, `zp*`, `rincon_*`, anything with `://` in it,
+    /// or stream filenames like `*.m3u8`, `*.mp3`, `*.aac`, `*.flac`, `*.mp4`.
     static func isSonosInternal(_ value: String) -> Bool {
         let v = value.lowercased()
         return v.hasPrefix("x-") ||
                v.hasPrefix("zp") ||
                v.hasPrefix("rincon_") ||
-               v.contains("://")
+               v.contains("://") ||
+               v.hasSuffix(".m3u8") ||
+               v.hasSuffix(".mp3") ||
+               v.hasSuffix(".aac") ||
+               v.hasSuffix(".flac") ||
+               v.hasSuffix(".mp4") ||
+               v.hasSuffix(".ogg") ||
+               v.hasSuffix(".wma") ||
+               // SomaFM-style stream names: "secretagent-128-mp3", "groovesalad-256-aac"
+               v.hasSuffix("-mp3") ||
+               v.hasSuffix("-aac") ||
+               v.hasSuffix("-ogg")
     }
 
     /// Returns metadata with Sonos internal strings filtered out.
@@ -185,11 +211,14 @@ extension DIDLLiteMetadata {
     ///
     /// Sonos sometimes returns relative URIs like `/getaa?s=1&u=...` which need
     /// to be prefixed with `http://{speakerIP}:1400`.
+    ///
+    /// HTTP URLs are kept as-is (NSAllowsArbitraryLoads covers them).
+    /// Upgrading to HTTPS breaks some CDNs (e.g., SiriusXM via Akamai).
     func resolvedAlbumArtURL(speakerIP: String) -> URL? {
         guard let uri = albumArtURI, !uri.isEmpty else { return nil }
 
-        // Already absolute
-        if uri.hasPrefix("http://") || uri.hasPrefix("https://") {
+        // Already absolute — return as-is
+        if uri.hasPrefix("https://") || uri.hasPrefix("http://") {
             return URL(string: uri)
         }
 

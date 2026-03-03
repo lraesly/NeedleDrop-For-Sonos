@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.needledrop", category: "PresetEditor")
 
 struct PresetEditorView: View {
     enum Mode: Equatable {
@@ -80,7 +83,8 @@ struct PresetEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            let allRooms = appState.speakers.map(\.roomName).sorted()
+            // Use zone topology (filters invisible/bonded devices) and deduplicate by name
+            let allRooms = Array(Set(appState.allTopologySpeakers.map(\.roomName))).sorted()
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(allRooms, id: \.self) { room in
@@ -179,10 +183,57 @@ struct PresetEditorView: View {
     private func matchFavorite() {
         if case .edit(let preset) = mode {
             selectedFavorite = appState.favorites.first(where: { $0.uri == preset.favorite.uri })
-        } else if let uri = prefillSourceUri {
-            selectedFavorite = appState.favorites.first(where: { $0.uri == uri })
-                ?? appState.favorites.first(where: { uriBase($0.uri) == uriBase(uri) })
+        } else if !prefillRooms.isEmpty {
+            // "Save What's Playing" — always use current volume
             volumeLevel = Double(appState.volume)
+
+            // Collect URIs to try: source URI + enqueued URI (closer to favorite for radio)
+            var urisToTry: [String] = []
+            if let uri = prefillSourceUri { urisToTry.append(uri) }
+            if let enqueued = appState.nowPlaying.enqueuedURI,
+               !urisToTry.contains(enqueued) {
+                urisToTry.append(enqueued)
+            }
+
+            log.info("Matching favorite — URIs to try: \(urisToTry)")
+            log.info("Available favorites: \(appState.favorites.map { "\($0.title): \($0.uri.prefix(60))" })")
+
+            // Try to match the playing source to a favorite by URI
+            for uri in urisToTry {
+                guard selectedFavorite == nil else { break }
+                // 1. Exact URI match
+                selectedFavorite = appState.favorites.first(where: { $0.uri == uri })
+                if selectedFavorite != nil { log.info("Matched by exact URI"); break }
+                // 2. Base URI match (strip query params)
+                selectedFavorite = appState.favorites.first(where: { uriBase($0.uri) == uriBase(uri) })
+                if selectedFavorite != nil { log.info("Matched by base URI"); break }
+                // 3. Partial match (favorite URI contained in source or vice versa)
+                let base = uriBase(uri)
+                selectedFavorite = appState.favorites.first(where: {
+                    base.contains(uriBase($0.uri)) || uriBase($0.uri).contains(base)
+                })
+                if selectedFavorite != nil { log.info("Matched by partial URI"); break }
+            }
+
+            // 4. Title-based fallback — match media/station title against favorite titles
+            if selectedFavorite == nil, let mediaTitle = appState.nowPlaying.mediaTitle {
+                log.info("URI matching failed, trying title match: '\(mediaTitle)'")
+                selectedFavorite = appState.favorites.first(where: {
+                    $0.title.localizedCaseInsensitiveCompare(mediaTitle) == .orderedSame
+                })
+                // Also try contains (e.g., "Underground Garage" matches "SXM Underground Garage")
+                if selectedFavorite == nil {
+                    selectedFavorite = appState.favorites.first(where: {
+                        $0.title.localizedStandardContains(mediaTitle) ||
+                        mediaTitle.localizedStandardContains($0.title)
+                    })
+                }
+                if selectedFavorite != nil { log.info("Matched by title") }
+            }
+
+            if selectedFavorite == nil {
+                log.warning("No favorite matched for current playback")
+            }
         }
     }
 

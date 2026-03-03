@@ -150,19 +150,75 @@ final class SonosDiscoveryService: ObservableObject {
 
         // UDN is uppercase in SwiftUPnP's Device model
         let uuid = definition.UDN.replacingOccurrences(of: "uuid:", with: "")
-        let roomName = definition.friendlyName
 
-        let sonosDevice = SonosDevice(
-            uuid: uuid,
-            roomName: roomName,
-            ip: host,
-            isCoordinator: false,
-            groupId: nil
+        // Store the UPnP device reference (needed for event subscriptions + SOAP control)
+        upnpDevices[uuid] = device
+
+        // If we already have this speaker from cache probe with a proper room name,
+        // keep it — don't overwrite with UPnP's friendlyName (which is technical,
+        // e.g., "192.168.1.214 - Sonos Amp" instead of "Study Sonos").
+        // Re-publish speakers so AppState's trySubscribeToActiveZone() can pick up
+        // the now-available UPnP device.
+        if let existing = speakers.first(where: { $0.uuid == uuid }) {
+            log.info("SSDP discovered: \(host) (already known as \(existing.roomName))")
+            addOrUpdateSpeaker(existing)
+            return
+        }
+
+        // New speaker not in cache — fetch the Sonos room name from device XML
+        Task {
+            if let probed = await probeIP(host, knownUUID: uuid, knownName: nil) {
+                addOrUpdateSpeaker(probed)
+                log.info("SSDP discovered: \(probed.roomName) at \(host)")
+            } else {
+                // Fallback to UPnP friendlyName if XML parse fails
+                let sonosDevice = SonosDevice(
+                    uuid: uuid,
+                    roomName: definition.friendlyName,
+                    ip: host,
+                    isCoordinator: false,
+                    groupId: nil
+                )
+                addOrUpdateSpeaker(sonosDevice)
+                log.info("SSDP discovered: \(definition.friendlyName) at \(host)")
+            }
+        }
+    }
+
+    // MARK: - Direct UPnP Device Loading
+
+    /// Load a UPnP device directly from a speaker IP, bypassing SSDP.
+    ///
+    /// Creates a `UPnPDevice` from the device description URL and feeds it to
+    /// the shared registry, which loads root XML, creates typed services (AVTransport,
+    /// RenderingControl, etc.), and fires `deviceAddedSubject`. Our existing
+    /// `handleDiscoveredUPnPDevice` then picks it up and triggers event subscription.
+    ///
+    /// This is the fallback when SSDP multicast discovery doesn't find the speaker
+    /// (common on some Sonos devices / network configurations).
+    func loadUPnPDeviceDirectly(ip: String, uuid: String) {
+        guard upnpDevices[uuid] == nil else { return }
+
+        log.info("Loading UPnP device directly for \(uuid) at \(ip)")
+
+        let descURL = URL(string: "http://\(ip):1400/xml/device_description.xml")!
+        let description = UPnPDeviceDescription(
+            uuid: "uuid:\(uuid)",
+            deviceId: Self.sonosDeviceType,
+            deviceType: Self.sonosDeviceType,
+            url: descURL,
+            lastSeen: Date()
         )
 
-        log.info("SSDP discovered: \(roomName) at \(host)")
-        upnpDevices[uuid] = device
-        addOrUpdateSpeaker(sonosDevice)
+        guard let data = try? JSONEncoder().encode(description),
+              let device = UPnPDevice.reanimate(from: data) else {
+            log.error("Failed to create UPnP device description for \(uuid)")
+            return
+        }
+
+        // Registry.add() is async internally: loads root XML → creates services →
+        // fires deviceAddedSubject → our handleDiscoveredUPnPDevice picks it up.
+        UPnPRegistry.shared.add(device)
     }
 
     // MARK: - Speaker Management
@@ -265,9 +321,15 @@ private class DeviceDescriptionParser: NSObject, XMLParserDelegate {
         let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         switch element {
         case "UDN":
-            uuid = text.replacingOccurrences(of: "uuid:", with: "")
+            // Only capture the first UDN (root device) — embedded devices
+            // (MediaRenderer, MediaServer) have different UDNs with suffixes.
+            if uuid == nil {
+                uuid = text.replacingOccurrences(of: "uuid:", with: "")
+            }
         case "roomName":
-            roomName = text
+            if roomName == nil {
+                roomName = text
+            }
         default:
             break
         }

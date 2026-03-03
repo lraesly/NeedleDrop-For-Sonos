@@ -119,7 +119,6 @@ struct LibraryServicesView: View {
                 if appState.appleMusicService.isConnected {
                     Button("Disconnect") {
                         appState.appleMusicService.disconnect()
-                        appState.objectWillChange.send()
                     }
                     .font(.caption)
                     .buttonStyle(.plain)
@@ -136,8 +135,11 @@ struct LibraryServicesView: View {
                 } else {
                     Button("Connect") {
                         Task {
-                            await appState.appleMusicService.requestAuthorization()
-                            appState.objectWillChange.send()
+                            let status = await appState.appleMusicService.requestAuthorization()
+                            // Disconnect Spotify — only one library service at a time
+                            if status == .authorized, appState.spotifyService.isConnected {
+                                appState.spotifyService.disconnect()
+                            }
                         }
                     }
                     .font(.caption)
@@ -196,6 +198,10 @@ struct LibraryServicesView: View {
         Task {
             do {
                 try await appState.spotifyService.authorize()
+                // Disconnect Apple Music — only one library service at a time
+                if appState.appleMusicService.isConnected {
+                    appState.appleMusicService.disconnect()
+                }
                 isConnecting = false
                 successMessage = "Spotify connected"
                 Task {
