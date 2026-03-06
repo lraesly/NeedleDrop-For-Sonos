@@ -93,7 +93,9 @@ final class AlbumArtWindow {
             object: p,
             queue: .main
         ) { [weak self] _ in
-            self?.dismiss()
+            MainActor.assumeIsolated {
+                self?.dismiss()
+            }
         }
 
         panel = p

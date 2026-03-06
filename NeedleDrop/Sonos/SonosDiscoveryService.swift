@@ -275,11 +275,16 @@ final class SonosDiscoveryService: ObservableObject {
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            log.info("System wake — re-discovering speakers")
-            self?.speakers.removeAll()
-            self?.upnpDevices.removeAll()
-            self?.startDiscovery()
+        ) { _ in
+            // Re-posted to main actor to satisfy strict concurrency.
+            // The notification is observed on .main queue, and the Task
+            // dispatches back to @MainActor for property access.
+            Task { @MainActor [weak self] in
+                log.info("System wake — re-discovering speakers")
+                self?.speakers.removeAll()
+                self?.upnpDevices.removeAll()
+                self?.startDiscovery()
+            }
         }
         workspaceObservers.append(observer)
     }

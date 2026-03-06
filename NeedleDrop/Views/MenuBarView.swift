@@ -36,7 +36,7 @@ struct MenuBarView: View {
         }
         .popover(isPresented: Binding(
             get: { appState.presetNav != nil },
-            set: { if !$0 { appState.presetNav = nil } }
+            set: { if !$0 { DispatchQueue.main.async { appState.presetNav = nil } } }
         )) {
             presetPopoverContent
         }

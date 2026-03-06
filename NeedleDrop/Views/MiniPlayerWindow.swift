@@ -5,8 +5,8 @@ import SwiftUI
 // MARK: - Hover Poller
 
 /// Lightweight 10 Hz timer that checks whether the cursor is inside a window.
-/// Plain NSObject (not @MainActor) to avoid Swift-concurrency isolation issues
-/// with Timer's @Sendable closure requirement.
+/// Runs on the main run loop, so @MainActor is correct.
+@MainActor
 private final class HoverPoller: NSObject {
     weak var panel: NSPanel?
     var onStateChange: ((Bool) -> Void)?
@@ -143,8 +143,10 @@ final class MiniPlayerWindow {
             object: p,
             queue: .main
         ) { [weak appState] _ in
-            withAnimation(.easeInOut(duration: 0.3)) {
-                appState?.isMiniPlayerActive = true
+            MainActor.assumeIsolated {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    appState?.isMiniPlayerActive = true
+                }
             }
         }
         resignKeyObserver = NotificationCenter.default.addObserver(
@@ -152,10 +154,12 @@ final class MiniPlayerWindow {
             object: p,
             queue: .main
         ) { [weak appState, weak p] _ in
-            let mouseInside = p.map { $0.frame.contains(NSEvent.mouseLocation) } ?? false
-            if !mouseInside {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    appState?.isMiniPlayerActive = false
+            MainActor.assumeIsolated {
+                let mouseInside = p.map { $0.frame.contains(NSEvent.mouseLocation) } ?? false
+                if !mouseInside {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        appState?.isMiniPlayerActive = false
+                    }
                 }
             }
         }
@@ -176,11 +180,13 @@ final class MiniPlayerWindow {
             object: p,
             queue: .main
         ) { [weak self, weak appState] _ in
-            self?.lastOrigin = self?.panel?.frame.origin
-            self?.panel = nil
-            self?.cleanup()
-            appState?.isMiniPlayerVisible = false
-            appState?.isMiniPlayerActive = false
+            MainActor.assumeIsolated {
+                self?.lastOrigin = self?.panel?.frame.origin
+                self?.panel = nil
+                self?.cleanup()
+                appState?.isMiniPlayerVisible = false
+                appState?.isMiniPlayerActive = false
+            }
         }
 
         panel = p

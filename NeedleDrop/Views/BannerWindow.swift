@@ -64,7 +64,9 @@ final class BannerWindow {
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             w.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            self?.window?.orderOut(nil)
+            MainActor.assumeIsolated {
+                self?.window?.orderOut(nil)
+            }
         })
     }
 }

@@ -102,7 +102,7 @@ final class ScrobblerClient: ObservableObject {
                     var addr = sockaddrIn.sin_addr
                     var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
                     inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN))
-                    hostStr = String(cString: buffer)
+                    hostStr = String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
                 }
             }
             if hostStr != nil { break }
