@@ -9,26 +9,35 @@ struct PresetListView: View {
             Text("Edit Presets")
                 .font(.headline)
 
-            if appState.presetStore.presets.isEmpty {
+            if appState.filteredPresets.isEmpty {
                 Text("No presets yet.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             } else {
-                List {
-                    ForEach(appState.presetStore.presets) { preset in
-                        Button {
-                            appState.presetNav = .edit(preset)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.name)
-                                    .font(.body)
-                                Text("\(preset.favorite.title) \u{2022} \(preset.rooms.joined(separator: ", "))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(appState.filteredPresets) { preset in
+                            Button {
+                                appState.presetNav = .edit(preset)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(preset.name)
+                                        .font(.body)
+                                    Text("\(preset.favorite.title) \u{2022} \(preset.rooms.joined(separator: ", "))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(HoverRowButtonStyle())
+
+                            if preset.id != appState.filteredPresets.last?.id {
+                                Divider()
                             }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .frame(maxHeight: 200)

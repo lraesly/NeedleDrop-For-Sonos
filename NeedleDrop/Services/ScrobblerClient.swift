@@ -194,6 +194,11 @@ final class ScrobblerClient: ObservableObject {
                 do {
                     _ = try await getStatus()
                     log.info("Scrobbler at \(saved.host):\(saved.port) is reachable")
+
+                    // Fetch and cache filter rules so DJ detection works immediately
+                    if let filters = try? await self.getFilters() {
+                        self.cacheFilterRules(filters.rules)
+                    }
                 } catch {
                     log.warning("Cached scrobbler at \(saved.host):\(saved.port) unreachable — auto-discovering")
                     self.config = nil
@@ -201,6 +206,27 @@ final class ScrobblerClient: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Non-Music Filter Rules (Local Cache)
+
+    /// Cache filter rules locally so SonosEventHandler can use them for
+    /// client-side DJ/non-music detection without a server round-trip.
+    func cacheFilterRules(_ rules: [FilterRule]) {
+        if let data = try? JSONEncoder().encode(rules) {
+            UserDefaults.standard.set(data, forKey: "nonMusicFilterRules")
+        }
+    }
+
+    /// Load locally cached filter rules (called from SonosEventHandler).
+    /// Nonisolated because UserDefaults is thread-safe and this is called
+    /// from nonisolated contexts during event processing.
+    nonisolated static func cachedFilterRules() -> [FilterRule] {
+        guard let data = UserDefaults.standard.data(forKey: "nonMusicFilterRules"),
+              let rules = try? JSONDecoder().decode([FilterRule].self, from: data) else {
+            return []
+        }
+        return rules
     }
 
     // MARK: - API Calls
@@ -220,12 +246,13 @@ final class ScrobblerClient: ObservableObject {
                   let value = dict["value"] as? String else { return nil }
 
             let type: FilterRule.FilterType = field == "artist" ? .artistExclude : .titleExclude
-            // Convert mode+value back to pattern for display
+            // Convert mode+value back to regex pattern (used by matchesNonMusicFilter)
+            let escaped = NSRegularExpression.escapedPattern(for: value)
             let pattern: String
             switch mode {
-            case "exact": pattern = value
-            case "starts_with": pattern = "\(value)*"
-            case "contains": pattern = "*\(value)*"
+            case "exact": pattern = "^\(escaped)$"
+            case "starts_with": pattern = "^\(escaped)"
+            case "contains": pattern = escaped
             case "regex": pattern = value
             default: pattern = value
             }

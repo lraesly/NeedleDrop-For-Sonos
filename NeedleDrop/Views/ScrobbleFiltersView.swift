@@ -115,6 +115,7 @@ struct ScrobbleFiltersView: View {
                 let result = try await appState.scrobblerClient.getFilters()
                 minDuration = result.minDuration
                 rules = result.rules
+                appState.scrobblerClient.cacheFilterRules(result.rules)
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -136,6 +137,7 @@ struct ScrobbleFiltersView: View {
                     minDuration: minDuration,
                     rules: validRules
                 )
+                appState.scrobblerClient.cacheFilterRules(validRules)
                 isSaving = false
                 successMessage = "Filters saved"
                 Task {

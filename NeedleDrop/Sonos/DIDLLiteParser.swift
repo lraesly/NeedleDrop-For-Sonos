@@ -119,10 +119,18 @@ extension DIDLLiteMetadata {
         /// Nil for non-SiriusXM streams.
         var type: String?
 
-        /// Whether this is a non-music segment (DJ talk, ad break, etc.).
+        /// Whether this is a non-music segment based on SiriusXM protocol metadata.
+        /// Checks the TYPE field first, then falls back to `#`/`@` prefix heuristics
+        /// for social media prompts during DJ segments (e.g., `#LSUG`, `@DelranPalmyra`).
+        /// Additional pattern-based detection is handled by configurable filter rules
+        /// (Settings → Scrobbling) applied in SonosEventHandler.
         var isDJOrNonMusic: Bool {
-            guard let type else { return false }
-            return type != "SNG"
+            // SiriusXM TYPE field: anything other than "SNG" is non-music
+            if let type, type != "SNG" { return true }
+            // Social media prompts during DJ segments use # and @ prefixes
+            if let title, title.hasPrefix("#") || title.hasPrefix("@") { return true }
+            if let artist, artist.hasPrefix("#") || artist.hasPrefix("@") { return true }
+            return false
         }
     }
 

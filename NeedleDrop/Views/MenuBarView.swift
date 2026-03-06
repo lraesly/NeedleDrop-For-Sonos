@@ -4,6 +4,7 @@ struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
     @State private var showSetup = false
     @State private var setupTab = 0
+    @State private var newHomeName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +39,13 @@ struct MenuBarView: View {
             set: { if !$0 { appState.presetNav = nil } }
         )) {
             presetPopoverContent
+        }
+        .alert("Name This Home", isPresented: $appState.pendingHomeNaming) {
+            TextField("e.g. Bethesda, Beach House", text: $newHomeName)
+            Button("Save") { saveHomeName() }
+            Button("Skip", role: .cancel) { saveHomeName() }
+        } message: {
+            Text("Give this Sonos system a name so presets can be organized by home.")
         }
     }
 
@@ -113,7 +121,7 @@ struct MenuBarView: View {
                           ? "pip.fill" : "pip")
                         .font(.caption)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
                 .foregroundColor(.secondary)
                 .help(appState.isMiniPlayerVisible ? "Hide Mini Player" : "Show Mini Player")
 
@@ -125,7 +133,7 @@ struct MenuBarView: View {
                           ? "bell.fill" : "bell.slash")
                         .font(.caption)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
                 .foregroundColor(.secondary)
                 .help(appState.isBannerEnabled ? "Song change popups: On" : "Song change popups: Off")
 
@@ -142,7 +150,7 @@ struct MenuBarView: View {
                             .font(.caption)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
                 .foregroundColor(showSetup ? .accentColor : .secondary)
                 .help(showSetup ? "Close Setup" : "Setup")
             }
@@ -156,12 +164,24 @@ struct MenuBarView: View {
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(HoverButtonStyle())
             .font(.caption2)
             .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    // MARK: - Home Naming
+
+    private func saveHomeName() {
+        guard let id = appState.currentHouseholdId else { return }
+        let trimmed = newHomeName.trimmingCharacters(in: .whitespaces)
+        let name = trimmed.isEmpty
+            ? "Home \(appState.homeStore.homes.count + 1)"
+            : trimmed
+        appState.homeStore.addHome(householdId: id, name: name)
+        newHomeName = ""
     }
 
     // MARK: - Preset Popover

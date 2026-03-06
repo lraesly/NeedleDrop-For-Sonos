@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // MARK: - Hover Poller
@@ -78,6 +79,10 @@ final class MiniPlayerWindow {
     private var resignKeyObserver: NSObjectProtocol?
     private var hoverPoller: HoverPoller?
     private weak var appStateRef: AppState?
+    /// Forces the NSHostingView to re-render when AppState publishes changes.
+    /// Without this, macOS throttles SwiftUI updates for non-activating floating
+    /// panels when the app is not the active (foreground) application.
+    private var refreshCancellable: AnyCancellable?
 
     func show(appState: AppState) {
         // If already showing, just bring to front
@@ -179,6 +184,17 @@ final class MiniPlayerWindow {
         }
 
         panel = p
+
+        // Observe AppState changes and nudge the hosting view to re-render.
+        // macOS throttles SwiftUI updates for non-activating floating panels
+        // when the app is in the background — marking needsDisplay ensures
+        // track changes, progress bar updates, etc. appear immediately.
+        refreshCancellable = appState.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak p] _ in
+                p?.contentView?.needsDisplay = true
+            }
+
         p.orderFrontRegardless()
     }
 
@@ -232,6 +248,7 @@ final class MiniPlayerWindow {
     private func cleanup() {
         hoverPoller?.stop()
         hoverPoller = nil
+        refreshCancellable = nil
         if let o = closeObserver { NotificationCenter.default.removeObserver(o) }
         if let o = keyObserver { NotificationCenter.default.removeObserver(o) }
         if let o = resignKeyObserver { NotificationCenter.default.removeObserver(o) }

@@ -137,7 +137,7 @@ struct NowPlayingView: View {
                     Image(systemName: "backward.fill")
                         .font(.body)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
                 .help("Previous")
             }
 
@@ -150,7 +150,7 @@ struct NowPlayingView: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(HoverButtonStyle())
             .help(isTV
                   ? (appState.isTVMuted ? "Unmute" : "Mute")
                   : (nowPlaying.transportState == .playing ? "Pause" : "Play"))
@@ -162,7 +162,7 @@ struct NowPlayingView: View {
                     Image(systemName: "forward.fill")
                         .font(.body)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
                 .help("Next")
             }
         }
@@ -196,7 +196,7 @@ struct NowPlayingView: View {
                         canSave ? .secondary : .secondary.opacity(0.3)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(HoverButtonStyle())
             .help(canSave ? "Save to library" : "Connect Spotify or Apple Music in Setup to save tracks")
             .disabled(isSaving || !canSave)
         }

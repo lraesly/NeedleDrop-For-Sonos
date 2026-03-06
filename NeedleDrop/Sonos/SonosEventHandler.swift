@@ -43,6 +43,10 @@ final class SonosEventHandler: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Timestamp of the last successfully received AVTransport event.
+    /// Used by AppState's position polling watchdog to detect stale subscriptions.
+    private(set) var lastEventTime: Date?
+
     // MARK: - URLSession (no HTTP caching)
 
     /// Dedicated session for SOAP queries — caching disabled since responses are
@@ -66,7 +70,8 @@ final class SonosEventHandler: ObservableObject {
     /// Persistent station/logo art URL for the current station.
     /// Unlike `pendingArtURL` (consumed on first track change), this persists
     /// across the station session and serves as fallback art for DJ segments.
-    private var stationArtURL: URL?
+    /// `private(set)` for station break detection in position polling (AppState).
+    private(set) var stationArtURL: URL?
 
     /// Persistent station/service name for the current station session.
     /// Set from GetMediaInfo (SOAP) and enqueuedTransportURIMetaData (events).
@@ -114,6 +119,7 @@ final class SonosEventHandler: ObservableObject {
         lastAVTransportURI = nil
         stationArtURL = nil
         currentMediaTitle = nil
+        lastEventTime = nil
 
         // Subscribe to UPnP events (HTTP SUBSCRIBE)
         await service.subscribeToEvents()
@@ -125,11 +131,7 @@ final class SonosEventHandler: ObservableObject {
         service.stateSubject
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                guard let self else {
-                    log.warning("stateSubject sink: self is nil")
-                    return
-                }
-                log.debug("stateSubject sink fired")
+                guard let self else { return }
                 Task { @MainActor in
                     await self.handleEvent(state)
                 }
@@ -159,6 +161,51 @@ final class SonosEventHandler: ObservableObject {
         avTransportService = nil
         subscribedDevice = nil
         subscribedSpeakerIP = nil
+    }
+
+    /// Re-subscribe to the current device's events without changing devices.
+    /// Called by the position polling watchdog when the event subscription
+    /// appears to have gone stale (SOAP works but no events arriving).
+    func resubscribe() async {
+        guard subscribedDevice != nil,
+              let speakerIP = subscribedSpeakerIP else {
+            log.warning("resubscribe() called with no active device")
+            return
+        }
+        let zoneName = nowPlaying.zoneName ?? "unknown"
+        log.info("Resubscribing to AVTransport events on \(zoneName) (\(speakerIP))")
+
+        // Unsubscribe from the old subscription (clears Combine sinks)
+        cancellables.removeAll()
+        if let service = avTransportService {
+            await service.unsubscribeFromEvents()
+        }
+
+        // Re-subscribe using the same device/service
+        guard let service = avTransportService else {
+            log.error("No AVTransport service for resubscribe")
+            return
+        }
+
+        await service.subscribeToEvents()
+
+        // Re-attach the Combine sink
+        service.stateSubject
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.handleEvent(state)
+                }
+            }
+            .store(in: &cancellables)
+
+        lastEventTime = nil  // Reset — expect a fresh event soon
+
+        log.info("Resubscribed to \(zoneName)")
+
+        // Refresh current state via SOAP so the display updates immediately
+        await fetchCurrentState(speakerIP: speakerIP)
     }
 
     // MARK: - Initial State Fetch
@@ -207,10 +254,15 @@ final class SonosEventHandler: ObservableObject {
         let enqueuedURI = mediaFields["CurrentURI"]
         let mediaMetaXML = mediaFields["CurrentURIMetaData"]
 
-        // Parse media/station title from CurrentURIMetaData (for preset matching)
+        // Parse media/station title and art from CurrentURIMetaData
         var mediaTitle: String?
         if let xml = mediaMetaXML, let mediaMeta = DIDLLiteParser.parse(xml) {
             mediaTitle = mediaMeta.title
+            // Station logo art (e.g. TuneIn station image) — use as fallback
+            // for DJ segments when per-track DIDL has no art
+            if let mediaArt = mediaMeta.resolvedAlbumArtURL(speakerIP: speakerIP) {
+                stationArtURL = mediaArt
+            }
         }
         // Persist the station title so it survives race conditions
         if let mediaTitle {
@@ -268,10 +320,17 @@ final class SonosEventHandler: ObservableObject {
             // For radio: streamContent has the CURRENT track info and should
             // override dc:title/dc:creator which often contain the stream/station
             // name rather than the actual song (e.g. "secretagent-128-mp3").
+            var isDJ = false
             if let streamInfo = meta.parsedStreamContent {
                 if let sArtist = streamInfo.artist { artist = sArtist }
                 if let sTitle = streamInfo.title { title = sTitle }
                 if let sAlbum = streamInfo.album { album = sAlbum }
+                isDJ = streamInfo.isDJOrNonMusic
+            }
+
+            // Check configurable non-music filter rules
+            if !isDJ {
+                isDJ = matchesNonMusicFilter(artist: artist, title: title)
             }
 
             if let artist, let title {
@@ -280,8 +339,9 @@ final class SonosEventHandler: ObservableObject {
                     artist: artist,
                     album: album,
                     durationSeconds: duration,
-                    albumArtURL: artURL,
-                    sourceURI: trackURI
+                    albumArtURL: artURL ?? stationArtURL,
+                    sourceURI: trackURI,
+                    isDJSegment: isDJ
                 )
 
                 nowPlaying = NowPlayingState(
@@ -303,26 +363,57 @@ final class SonosEventHandler: ObservableObject {
 
                 log.info("Initial state: \(artist) — \(title) (\(state.rawValue)), media=\(mediaTitle ?? "nil")")
 
-                // Enrich art + duration from iTunes
+                // Enrich art from iTunes (duration skipped for initial fetch —
+                // we can't determine position within a radio song mid-stream,
+                // so the progress bar waits until the next event-driven track change)
                 Task {
-                    if let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title) {
-                        if self.nowPlaying.track?.id == track.id {
-                            if let url = enrichment.artURL {
-                                track.albumArtURL = url
-                            }
-                            if let dur = enrichment.durationSeconds, track.durationSeconds == 0 {
-                                track.durationSeconds = dur
-                                log.debug("Enriched duration for \(artist) — \(title): \(dur)s")
-                            }
-                            self.nowPlaying.track = track
-                        }
+                    let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title)
+                    guard self.nowPlaying.track?.id == track.id else { return }
+
+                    if let url = enrichment?.artURL {
+                        track.albumArtURL = url
                     }
+                    // Fall back to station logo when no art was found
+                    if track.albumArtURL == nil, let fallback = self.stationArtURL {
+                        track.albumArtURL = fallback
+                    }
+                    self.nowPlaying.track = track
                 }
                 return
             }
         }
 
-        // No track metadata — just update transport state
+        // No track metadata — check if this is a radio station break
+        // (transport PLAYING but no song metadata, e.g. TuneIn DJ segment).
+        // Show the station name so the UI isn't blank.
+        if (state == .playing || state == .transitioning),
+           let stationName = mediaTitle ?? currentMediaTitle {
+            log.info("Initial state: station break on \(stationName) (\(state.rawValue))")
+
+            // Seed station state for subsequent events
+            if let uri = enqueuedURI {
+                lastAVTransportURI = uri
+            }
+
+            nowPlaying = NowPlayingState(
+                track: TrackInfo(
+                    title: stationName,
+                    artist: "",
+                    album: nil,
+                    durationSeconds: 0,
+                    albumArtURL: stationArtURL,
+                    sourceURI: trackURI,
+                    isDJSegment: true
+                ),
+                transportState: state,
+                zoneName: nowPlaying.zoneName,
+                enqueuedURI: enqueuedURI,
+                mediaTitle: stationName
+            )
+            return
+        }
+
+        // No track metadata and not a station break — just update transport state
         nowPlaying = NowPlayingState(
             track: nil,
             transportState: state,
@@ -369,6 +460,31 @@ final class SonosEventHandler: ObservableObject {
         }
     }
 
+    /// Check if a track matches any locally cached non-music filter rules.
+    ///
+    /// The same rules are also used server-side by the Python scrobbler.
+    /// Patterns are matched as case-insensitive regex (same as the server).
+    private nonisolated func matchesNonMusicFilter(artist: String?, title: String?) -> Bool {
+        let rules = ScrobblerClient.cachedFilterRules()
+        guard !rules.isEmpty else { return false }
+        for rule in rules {
+            guard !rule.pattern.isEmpty else { continue }
+            let target: String?
+            switch rule.type {
+            case .artistExclude: target = artist
+            case .titleExclude:  target = title
+            }
+            guard let target, !target.isEmpty else { continue }
+            if let regex = try? NSRegularExpression(pattern: rule.pattern, options: .caseInsensitive) {
+                let range = NSRange(target.startIndex..., in: target)
+                if regex.firstMatch(in: target, range: range) != nil {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     /// Parse "H:MM:SS" or "0:MM:SS" duration string to seconds.
     private nonisolated func parseDuration(_ str: String?) -> Int {
         guard let str, !str.isEmpty, str != "NOT_IMPLEMENTED" else { return 0 }
@@ -383,17 +499,19 @@ final class SonosEventHandler: ObservableObject {
     private func handleEvent(_ state: AVTransport1Service.State) async {
         guard let lastChange = state.lastChange,
               let speakerIP = subscribedSpeakerIP else {
-            log.debug("Event skipped: lastChange=\(state.lastChange != nil), speakerIP=\(self.subscribedSpeakerIP != nil)")
             return
         }
 
-        log.debug("Event received (\(lastChange.count) bytes)")
+        lastEventTime = Date()
 
         // 1. Parse the LastChange XML
         guard let event = LastChangeParser.parse(lastChange) else {
             log.debug("Could not parse LastChange XML")
             return
         }
+
+        // 1b. Log all events for diagnostics
+        log.info("AVTransport event: transportState=\(event.transportState ?? "nil"), hasTrackMeta=\(event.currentTrackMetaData != nil), avTransportURI=\(event.avTransportURI?.prefix(80) ?? "nil")")
 
         // 2. Detect station change
         //    Only trigger when we had a previous URI (lastAVTransportURI != nil).
@@ -417,16 +535,23 @@ final class SonosEventHandler: ObservableObject {
             log.debug("Station change detected — cleared mediaTitle")
         }
 
-        // 2b. Update media title from enqueued metadata (station/favorite name).
+        // 2b. Update media title and station art from enqueued metadata (station/favorite name).
         //     Only write to @Published nowPlaying when the value actually changes
         //     to avoid unnecessary SwiftUI redraws (SiriusXM sends frequent events).
         if let metaXML = event.enqueuedTransportURIMetaData,
-           let meta = DIDLLiteParser.parse(metaXML),
-           let title = meta.title {
-            currentMediaTitle = title
-            if nowPlaying.mediaTitle != title {
-                nowPlaying.mediaTitle = title
-                log.debug("Media title from event: \(title)")
+           let meta = DIDLLiteParser.parse(metaXML) {
+            if let title = meta.title {
+                currentMediaTitle = title
+                if nowPlaying.mediaTitle != title {
+                    nowPlaying.mediaTitle = title
+                    log.debug("Media title from event: \(title)")
+                }
+            }
+            // Station logo art from enqueued metadata (e.g. TuneIn station image)
+            if stationArtURL == nil,
+               let mediaArt = meta.resolvedAlbumArtURL(speakerIP: speakerIP) {
+                stationArtURL = mediaArt
+                log.debug("Station art from enqueued metadata: \(mediaArt)")
             }
         }
 
@@ -489,6 +614,9 @@ final class SonosEventHandler: ObservableObject {
             newAlbum = meta.album
             newArtURL = meta.resolvedAlbumArtURL(speakerIP: speakerIP)
 
+            // Log raw radio metadata for diagnostics
+            log.info("Event DIDL: title=\(meta.title ?? "nil"), creator=\(meta.creator ?? "nil"), streamContent=\(meta.streamContent ?? "nil"), radioShowMd=\(meta.radioShowMd ?? "nil")")
+
             // For radio: streamContent has the CURRENT track info and should
             // override dc:title/dc:creator which often contain the stream/station
             // name rather than the actual song (e.g. "secretagent-128-mp3").
@@ -498,6 +626,11 @@ final class SonosEventHandler: ObservableObject {
                 if let album = streamInfo.album { newAlbum = album }
                 isDJSegment = streamInfo.isDJOrNonMusic
             }
+        }
+
+        // Check configurable non-music filter rules (from Settings → Scrobbling)
+        if !isDJSegment {
+            isDJSegment = matchesNonMusicFilter(artist: newArtist, title: newTitle)
         }
 
         // 6. Station-transition art capture
@@ -520,7 +653,7 @@ final class SonosEventHandler: ObservableObject {
             if newTrackID != oldTrackID {
                 // Use station-transition art if available (more reliable than current event's art).
                 // For DJ segments, fall back to persistent station art (logo).
-                let artURL = pendingArtURL ?? newArtURL ?? (isDJSegment ? stationArtURL : nil)
+                let artURL = pendingArtURL ?? newArtURL ?? stationArtURL
                 pendingArtURL = nil
                 awaitingStationArt = false
 
@@ -562,24 +695,54 @@ final class SonosEventHandler: ObservableObject {
                 // Enrich art + duration from iTunes in background (only for actual songs with artist)
                 if !artist.isEmpty, !isDJSegment {
                     Task {
-                        if let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title) {
-                            // Only update if we're still on the same track
-                            if self.nowPlaying.track?.id == newTrackID {
-                                if let url = enrichment.artURL {
-                                    track.albumArtURL = url
-                                }
-                                if let dur = enrichment.durationSeconds, track.durationSeconds == 0 {
-                                    track.durationSeconds = dur
-                                    log.debug("Enriched duration for \(artist) — \(title): \(dur)s")
-                                }
-                                self.nowPlaying.track = track
-                            }
+                        let enrichment = await albumArtEnricher.searchArt(artist: artist, title: title)
+                        // Only update if we're still on the same track
+                        guard self.nowPlaying.track?.id == newTrackID else { return }
+
+                        if let url = enrichment?.artURL {
+                            track.albumArtURL = url
                         }
+                        if let dur = enrichment?.durationSeconds, track.durationSeconds == 0 {
+                            track.durationSeconds = dur
+                            log.debug("Enriched duration for \(artist) — \(title): \(dur)s")
+                        }
+                        // Fall back to station logo when no art was found
+                        // (iTunes miss + no per-track art in DIDL)
+                        if track.albumArtURL == nil, let fallback = self.stationArtURL {
+                            track.albumArtURL = fallback
+                        }
+                        self.nowPlaying.track = track
                     }
                 }
 
                 return
             }
+        }
+
+        // 7b. Radio station break detection: when a radio stream event arrives
+        //     with metadata but no artist/title/streamContent, the song has ended
+        //     and a DJ/break segment is in progress. Clear the track and show the
+        //     station name. This is generic for TuneIn and similar radio providers.
+        if resolvedTitle == nil,
+           event.currentTrackMetaData != nil,
+           let stationName = nowPlaying.mediaTitle ?? currentMediaTitle {
+            log.info("Station break detected on \(stationName)")
+            nowPlaying = NowPlayingState(
+                track: TrackInfo(
+                    title: stationName,
+                    artist: "",
+                    album: nil,
+                    durationSeconds: 0,
+                    albumArtURL: stationArtURL,
+                    sourceURI: transportURI,
+                    isDJSegment: true
+                ),
+                transportState: newTransportState,
+                zoneName: nowPlaying.zoneName,
+                enqueuedURI: nowPlaying.enqueuedURI,
+                mediaTitle: stationName
+            )
+            return
         }
 
         // 8. Between-song transition art: show station art when track metadata

@@ -7,14 +7,17 @@ struct Preset: Codable, Identifiable, Equatable, Hashable {
     var rooms: [String]
     var coordinatorRoom: String
     var volume: Int?
+    /// Sonos household ID that owns this preset.  `nil` = legacy/untagged (shown everywhere).
+    var householdId: String?
 
-    init(id: UUID = UUID(), name: String, favorite: PresetFavorite, rooms: [String], coordinatorRoom: String, volume: Int? = nil) {
+    init(id: UUID = UUID(), name: String, favorite: PresetFavorite, rooms: [String], coordinatorRoom: String, volume: Int? = nil, householdId: String? = nil) {
         self.id = id
         self.name = name
         self.favorite = favorite
         self.rooms = rooms
         self.coordinatorRoom = coordinatorRoom
         self.volume = volume
+        self.householdId = householdId
     }
 }
 

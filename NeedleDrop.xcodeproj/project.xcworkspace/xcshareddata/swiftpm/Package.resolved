@@ -1,0 +1,41 @@
+{
+  "pins" : [
+    {
+      "identity" : "cocoaasyncsocket",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/robbiehanson/CocoaAsyncSocket.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "5ddba5e72f38e56010dbfac08b44478ee5000c0c"
+      }
+    },
+    {
+      "identity" : "mocker",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/WeTransfer/Mocker.git",
+      "state" : {
+        "revision" : "95fa785c751f6bc40c49e112d433c3acf8417a97",
+        "version" : "3.0.2"
+      }
+    },
+    {
+      "identity" : "swifter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/httpswift/swifter.git",
+      "state" : {
+        "branch" : "stable",
+        "revision" : "1e4f51c92d7ca486242d8bf0722b99de2c3531aa"
+      }
+    },
+    {
+      "identity" : "xmlcoder",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CoreOffice/XMLCoder.git",
+      "state" : {
+        "revision" : "5e1ada828d2618ecb79c974e03f79c8f4df90b71",
+        "version" : "0.18.0"
+      }
+    }
+  ],
+  "version" : 2
+}

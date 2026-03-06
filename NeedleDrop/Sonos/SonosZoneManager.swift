@@ -58,6 +58,56 @@ final class SonosZoneManager {
         }
     }
 
+    // MARK: - Household Identity
+
+    /// Fetch the Sonos household ID from any speaker on the network.
+    ///
+    /// All speakers in the same Sonos system return the same household ID
+    /// (e.g., `Sonos_asahHKgjgJGjgjGjggjJgjJG34`).  Stable across reboots,
+    /// speaker additions/removals, and network changes.
+    func getHouseholdID(speakerIP: String) async -> String? {
+        let url = URL(string: "http://\(speakerIP):1400/DeviceProperties/Control")!
+
+        let soapBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+          <s:Body>
+            <u:GetHouseholdID xmlns:u="urn:schemas-upnp-org:service:DeviceProperties:1"/>
+          </s:Body>
+        </s:Envelope>
+        """
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = soapBody.data(using: .utf8)
+        request.setValue("text/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            "\"urn:schemas-upnp-org:service:DeviceProperties:1#GetHouseholdID\"",
+            forHTTPHeaderField: "SOAPAction"
+        )
+        request.timeoutInterval = 5
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                log.error("GetHouseholdID request failed for \(speakerIP)")
+                return nil
+            }
+
+            let extractor = SOAPElementExtractor(data: data, elementName: "CurrentHouseholdID")
+            let householdId = extractor.extract()?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let id = householdId {
+                log.info("Household ID: \(id)")
+            }
+            return householdId
+        } catch {
+            log.error("GetHouseholdID failed for \(speakerIP): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Transport Info
 
     /// Query the current transport state of a zone coordinator.
@@ -173,7 +223,10 @@ final class SonosZoneManager {
     /// Sets the speaker's AVTransport URI to `x-rincon:{coordinatorUUID}`,
     /// which makes it play audio from the coordinator's group.
     /// Uses SOAP directly so it works regardless of SSDP discovery state.
-    func joinSpeaker(speakerIP: String, toCoordinatorUUID coordinatorUUID: String) async {
+    /// Returns true on success, false on failure.
+    /// [Audit fix #1: return Bool so callers can detect grouping failures]
+    @discardableResult
+    func joinSpeaker(speakerIP: String, toCoordinatorUUID coordinatorUUID: String) async -> Bool {
         let url = URL(string: "http://\(speakerIP):1400/MediaRenderer/AVTransport/Control")!
         let rinconURI = "x-rincon:\(coordinatorUUID)"
 
@@ -205,12 +258,14 @@ final class SonosZoneManager {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
-                log.error("Join SOAP request failed")
-                return
+                log.error("Join SOAP request failed for \(speakerIP)")
+                return false
             }
             log.info("Joined speaker at \(speakerIP) to coordinator \(coordinatorUUID)")
+            return true
         } catch {
-            log.error("Join failed: \(error.localizedDescription)")
+            log.error("Join failed for \(speakerIP): \(error.localizedDescription)")
+            return false
         }
     }
 

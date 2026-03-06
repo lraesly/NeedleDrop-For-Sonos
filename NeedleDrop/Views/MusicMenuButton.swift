@@ -19,9 +19,9 @@ struct MusicMenuButton: View {
             }
 
             // -- Presets Section --
-            if !appState.presetStore.presets.isEmpty {
+            if !appState.filteredPresets.isEmpty {
                 Section("Presets") {
-                    ForEach(appState.presetStore.presets) { preset in
+                    ForEach(appState.filteredPresets) { preset in
                         Button {
                             appState.activatePreset(preset)
                         } label: {

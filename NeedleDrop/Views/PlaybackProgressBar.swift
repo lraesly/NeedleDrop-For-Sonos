@@ -16,36 +16,35 @@ struct PlaybackProgressBar: View {
     var timeColor: Color = Color.secondary
 
     var body: some View {
-        if duration > 0 {
-            VStack(spacing: 2) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background track
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(trackColor)
-                            .frame(height: 3)
+        VStack(spacing: 2) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Background track
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(trackColor)
+                        .frame(height: 3)
 
-                        // Progress fill
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(fillColor)
-                            .frame(width: progress * geometry.size.width, height: 3)
-                    }
+                    // Progress fill
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(fillColor)
+                        .frame(width: progress * geometry.size.width, height: 3)
                 }
-                .frame(height: 3)
+            }
+            .frame(height: 3)
 
-                if showTimestamps {
-                    HStack {
-                        Text(formatTime(position))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(timeColor)
-                        Spacer()
-                        Text("-\(formatTime(max(duration - position, 0)))")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(timeColor)
-                    }
+            if showTimestamps {
+                HStack {
+                    Text(duration > 0 ? formatTime(position) : " ")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(timeColor)
+                    Spacer()
+                    Text(duration > 0 ? "-\(formatTime(max(duration - position, 0)))" : " ")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(timeColor)
                 }
             }
         }
+        .opacity(duration > 0 ? 1 : 0)
     }
 
     private var progress: CGFloat {

@@ -120,6 +120,19 @@ struct PresetEditorView: View {
                 .font(.caption)
             }
 
+            // Home (read-only label)
+            if let homeName = appState.currentHomeName {
+                HStack {
+                    Text("Home")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(homeName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Volume
             Toggle("Set Volume", isOn: $includeVolume)
                 .toggleStyle(.checkbox)
@@ -264,7 +277,8 @@ struct PresetEditorView: View {
                 favorite: presetFavorite,
                 rooms: Array(selectedRooms).sorted(),
                 coordinatorRoom: coordinator,
-                volume: vol
+                volume: vol,
+                householdId: existing.householdId ?? appState.currentHouseholdId
             )
             appState.presetStore.update(updated)
         } else {
@@ -273,7 +287,8 @@ struct PresetEditorView: View {
                 favorite: presetFavorite,
                 rooms: Array(selectedRooms).sorted(),
                 coordinatorRoom: coordinator,
-                volume: vol
+                volume: vol,
+                householdId: appState.currentHouseholdId
             )
             appState.presetStore.add(preset)
         }

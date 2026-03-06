@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.needledrop", category: "PresetStore")
 
 /// Persists presets to UserDefaults.
 @MainActor
@@ -32,16 +35,26 @@ final class PresetStore: ObservableObject {
 
     // MARK: - Private
 
+    /// [Audit fix #9: decode errors are now logged instead of silently returning empty]
     private func loadPresets() -> [Preset] {
-        guard let data = UserDefaults.standard.data(forKey: storeKey),
-              let decoded = try? JSONDecoder().decode([Preset].self, from: data) else {
+        guard let data = UserDefaults.standard.data(forKey: storeKey) else {
             return []
         }
-        return decoded
+        do {
+            return try JSONDecoder().decode([Preset].self, from: data)
+        } catch {
+            log.error("Failed to decode presets: \(error.localizedDescription)")
+            return []
+        }
     }
 
+    /// [Audit fix #4: encode errors are now logged instead of silently dropping changes]
     private func save() {
-        guard let data = try? JSONEncoder().encode(presets) else { return }
-        UserDefaults.standard.set(data, forKey: storeKey)
+        do {
+            let data = try JSONEncoder().encode(presets)
+            UserDefaults.standard.set(data, forKey: storeKey)
+        } catch {
+            log.error("Failed to encode presets: \(error.localizedDescription)")
+        }
     }
 }

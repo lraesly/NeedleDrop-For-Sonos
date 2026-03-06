@@ -138,14 +138,13 @@ struct MiniPlayerView: View {
                                 .layoutPriority(-1)
                         }
 
-                        if appState.scrobbleTracker.isScrobbled(track.id) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.green)
-                                .shadow(color: shadow, radius: 2)
-                                .fixedSize()
-                                .help("Scrobbled")
-                        }
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.green)
+                            .shadow(color: shadow, radius: 2)
+                            .fixedSize()
+                            .help("Scrobbled")
+                            .opacity(appState.scrobbleTracker.isScrobbled(track.id) ? 1 : 0)
                     }
                 }
             }
@@ -153,8 +152,9 @@ struct MiniPlayerView: View {
         }
 
         // Progress bar (compact: bar only, no timestamps)
-        if !isTV, appState.playbackDuration > 0 {
+        if !isTV {
             compactProgressBar
+                .opacity(appState.playbackDuration > 0 ? 1 : 0)
         }
 
         // Bottom row: transport + heart + volume
@@ -164,7 +164,7 @@ struct MiniPlayerView: View {
                     Image(systemName: "backward.fill")
                         .font(.system(size: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
             }
 
             do {
@@ -175,7 +175,7 @@ struct MiniPlayerView: View {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 16))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
             }
 
             if !isTV {
@@ -183,7 +183,7 @@ struct MiniPlayerView: View {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
 
                 if !track.isDJSegment {
                     do {
@@ -204,7 +204,7 @@ struct MiniPlayerView: View {
                                         canSave ? iconColor : iconColor.opacity(0.3)
                                     )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(HoverButtonStyle())
                             .disabled(isSaving || !canSave)
                         }
                     }
@@ -261,14 +261,13 @@ struct MiniPlayerView: View {
                             .layoutPriority(-1)
                     }
 
-                    if appState.scrobbleTracker.isScrobbled(track.id) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.green)
-                            .shadow(color: shadow, radius: 2)
-                            .fixedSize()
-                            .help("Scrobbled")
-                    }
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                        .shadow(color: shadow, radius: 2)
+                        .fixedSize()
+                        .help("Scrobbled")
+                        .opacity(appState.scrobbleTracker.isScrobbled(track.id) ? 1 : 0)
                 }
             }
         }
@@ -292,7 +291,7 @@ struct MiniPlayerView: View {
                     Image(systemName: "backward.fill")
                         .font(.system(size: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
             }
 
             do {
@@ -303,7 +302,7 @@ struct MiniPlayerView: View {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 20))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
             }
 
             if !isTV {
@@ -311,7 +310,7 @@ struct MiniPlayerView: View {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverButtonStyle())
 
                 if !track.isDJSegment {
                     do {
@@ -332,7 +331,7 @@ struct MiniPlayerView: View {
                                         canSave ? iconColor : iconColor.opacity(0.3)
                                     )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(HoverButtonStyle())
                             .disabled(isSaving || !canSave)
                         }
                     }
@@ -413,8 +412,8 @@ struct MiniPlayerView: View {
                     .shadow(color: shadow, radius: 2)
                     .frame(width: 12)
             }
-            .buttonStyle(.plain)
-            .help(appState.volume == 0 ? "Unmute" : "Mute")
+            .buttonStyle(HoverButtonStyle())
+            .help(appState.isMuted || appState.volume == 0 ? "Unmute" : "Mute")
 
             customVolumeSlider
         }
@@ -488,7 +487,7 @@ struct MiniPlayerView: View {
     // MARK: - Helpers
 
     private var volumeIcon: String {
-        if appState.volume == 0 {
+        if appState.isMuted || appState.volume == 0 {
             return "speaker.slash.fill"
         } else if appState.volume < 33 {
             return "speaker.wave.1.fill"

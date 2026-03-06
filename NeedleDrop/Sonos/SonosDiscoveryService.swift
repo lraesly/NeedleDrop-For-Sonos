@@ -74,6 +74,12 @@ final class SonosDiscoveryService: ObservableObject {
         upnpDevices[uuid]
     }
 
+    /// A cached speaker IP from UserDefaults, for bootstrapping zone topology
+    /// before SSDP discovery completes.
+    var cachedSpeakerIP: String? {
+        speakerStore.loadCachedSpeakers().first?.ip
+    }
+
     // MARK: - Cached IP Fast Path
 
     /// Probe known speaker IPs by fetching their device description XML directly.
