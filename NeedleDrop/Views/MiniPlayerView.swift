@@ -347,14 +347,48 @@ struct MiniPlayerView: View {
 
     private var emptyContent: some View {
         VStack(spacing: 6) {
-            Image(systemName: "music.note")
-                .font(.system(size: isLarge ? 28 : 20))
-                .foregroundStyle(dimColor)
-                .shadow(color: shadow, radius: 2)
-            Text("Nothing playing")
-                .font(.caption)
-                .foregroundStyle(tertiaryColor)
-                .shadow(color: shadow, radius: 2)
+            switch appState.connectionState {
+            case .disconnected:
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: isLarge ? 28 : 20))
+                    .foregroundStyle(dimColor)
+                    .shadow(color: shadow, radius: 2)
+                Text("No speakers found")
+                    .font(.caption)
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+
+            case .discovering:
+                ProgressView()
+                    .scaleEffect(isLarge ? 0.8 : 0.6)
+                    .tint(dimColor)
+                Text("Searching\u{2026}")
+                    .font(.caption)
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+
+            case .connected:
+                Image(systemName: "music.note")
+                    .font(.system(size: isLarge ? 28 : 20))
+                    .foregroundStyle(dimColor)
+                    .shadow(color: shadow, radius: 2)
+                Text("Nothing playing")
+                    .font(.caption)
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+
+            case .error(let message):
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: isLarge ? 28 : 20))
+                    .foregroundStyle(dimColor)
+                    .shadow(color: shadow, radius: 2)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

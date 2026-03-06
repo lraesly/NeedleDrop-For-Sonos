@@ -6,6 +6,19 @@ struct SpeakerSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // App
+            sectionHeader("App")
+
+            Toggle("Launch at login", isOn: Binding(
+                get: { appState.launchAtLogin },
+                set: { appState.launchAtLogin = $0 }
+            ))
+            .font(.system(size: 12))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
+            Divider().padding(.vertical, 4)
+
             // Default Zone
             if !appState.zones.isEmpty {
                 sectionHeader("Default Zone")

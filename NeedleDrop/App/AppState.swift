@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import os
+import ServiceManagement
 import SwiftUPnP
 
 private let log = Logger(subsystem: "com.needledrop", category: "AppState")
@@ -134,6 +135,24 @@ final class AppState: ObservableObject {
         get { UserDefaults.standard.bool(forKey: "launchMiniPlayerOnStart") }
         set {
             UserDefaults.standard.set(newValue, forKey: "launchMiniPlayerOnStart")
+            Task { @MainActor in self.objectWillChange.send() }
+        }
+    }
+
+    /// Whether the app is registered to launch at login (macOS 13+).
+    /// Reads live state from SMAppService; the OS manages persistence.
+    var launchAtLogin: Bool {
+        get { SMAppService.mainApp.status == .enabled }
+        set {
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                log.error("Launch at login \(newValue ? "register" : "unregister") failed: \(error.localizedDescription)")
+            }
             Task { @MainActor in self.objectWillChange.send() }
         }
     }
@@ -360,6 +379,11 @@ final class AppState: ObservableObject {
 
                     // Load zones, favorites, and subscribe to events
                     self.onConnected()
+                } else if speakers.isEmpty && self.connectionState == .connected {
+                    // Speakers disappeared (network change, wake, etc.)
+                    // Discovery has already restarted, so transition to .discovering
+                    self.connectionState = .discovering
+                    log.info("Speakers lost — transitioning to discovering")
                 }
 
                 // When new UPnP devices are discovered via SSDP, try to subscribe
