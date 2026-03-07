@@ -304,7 +304,7 @@ struct ZonePillButton: View {
     }
 
     /// Diff pendingGroup against the current zone, apply all join/unjoin SOAP calls,
-    /// then refresh zones once after Sonos topology settles.
+    /// then poll until zone topology reflects the changes.
     private func applyGroupChanges() {
         guard let zone = appState.activeZone else { return }
 
@@ -321,6 +321,7 @@ struct ZonePillButton: View {
 
         let speakers = appState.allTopologySpeakers
         let coordinatorUUID = zone.coordinator.uuid
+        let expectedGroup = pendingGroup
 
         Task {
             // Send all SOAP commands sequentially
@@ -340,9 +341,11 @@ struct ZonePillButton: View {
                 }
             }
 
-            // Wait for Sonos topology to settle, then refresh once
-            try? await Task.sleep(for: .milliseconds(500))
-            await appState.refreshZones()
+            // Poll until Sonos topology reflects the expected group
+            await appState.refreshZones(
+                expectingCoordinator: coordinatorUUID,
+                withMembers: expectedGroup
+            )
         }
     }
 }

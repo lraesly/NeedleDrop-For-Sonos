@@ -906,6 +906,48 @@ final class AppState: ObservableObject {
         self.zones = groups
     }
 
+    /// Refresh zone topology, polling until the expected group composition appears.
+    /// After SOAP join/unjoin calls, Sonos hardware may take 1-2s to update its topology.
+    /// This polls up to `maxAttempts` times at `interval` intervals until the coordinator's
+    /// zone members match the expected set, then updates `self.zones`.
+    func refreshZones(
+        expectingCoordinator coordinatorUUID: String,
+        withMembers expectedUUIDs: Set<String>,
+        maxAttempts: Int = 6,
+        interval: Duration = .milliseconds(500)
+    ) async {
+        let ip = speakers.first?.ip
+            ?? allTopologySpeakers.first?.ip
+            ?? discoveryService.cachedSpeakerIP
+        guard let ip else { return }
+
+        for attempt in 1...maxAttempts {
+            let groups = await zoneManager.getZoneGroups(speakerIP: ip)
+
+            // Check if the coordinator's zone now has the expected members
+            if let zone = groups.first(where: { $0.coordinator.uuid == coordinatorUUID }) {
+                var actualUUIDs: Set<String> = [zone.coordinator.uuid]
+                for member in zone.members {
+                    actualUUIDs.insert(member.uuid)
+                }
+                if actualUUIDs == expectedUUIDs {
+                    log.info("Zone topology verified on attempt \(attempt)")
+                    self.zones = groups
+                    return
+                }
+            }
+
+            if attempt < maxAttempts {
+                try? await Task.sleep(for: interval)
+            }
+        }
+
+        // Topology didn't converge — use the last result anyway
+        log.warning("Zone topology did not match expected group after \(maxAttempts) attempts — using last result")
+        let groups = await zoneManager.getZoneGroups(speakerIP: ip)
+        self.zones = groups
+    }
+
     // MARK: - Volume Polling
 
     /// Fetch the current volume and mute state from the active zone's coordinator.
@@ -1185,8 +1227,19 @@ final class AppState: ObservableObject {
             }
 
             // 5. Refresh zones to reflect new grouping (must happen before
-            //    selectZone so the coordinator exists in the updated topology)
-            await refreshZones()
+            //    selectZone so the coordinator exists in the updated topology).
+            // Build expected member set from preset rooms for verification polling.
+            var expectedUUIDs: Set<String> = [coordinatorSpeaker.uuid]
+            for roomName in preset.rooms {
+                if let speaker = allTopologySpeakers.first(where: { $0.roomName == roomName })
+                    ?? speakers.first(where: { $0.roomName == roomName }) {
+                    expectedUUIDs.insert(speaker.uuid)
+                }
+            }
+            await refreshZones(
+                expectingCoordinator: coordinatorSpeaker.uuid,
+                withMembers: expectedUUIDs
+            )
 
             // 6. Switch active zone to the preset's coordinator
             selectZone(coordinatorSpeaker.uuid)

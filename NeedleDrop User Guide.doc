@@ -1,0 +1,380 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: -apple-system, Helvetica Neue, Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.5; margin: 72pt; }
+h1 { font-size: 28pt; font-weight: 700; color: #000; margin-top: 0; margin-bottom: 6pt; }
+h2 { font-size: 18pt; font-weight: 600; color: #1a1a1a; margin-top: 24pt; margin-bottom: 8pt; border-bottom: 1pt solid #ddd; padding-bottom: 4pt; }
+h3 { font-size: 13pt; font-weight: 600; color: #333; margin-top: 16pt; margin-bottom: 4pt; }
+p { margin-top: 0; margin-bottom: 8pt; }
+ul { margin-top: 4pt; margin-bottom: 8pt; padding-left: 24pt; }
+li { margin-bottom: 4pt; }
+table { border-collapse: collapse; margin: 8pt 0 16pt 0; }
+td, th { border: 1pt solid #ccc; padding: 6pt 12pt; text-align: left; font-size: 10pt; }
+th { background-color: #f5f5f5; font-weight: 600; }
+.subtitle { font-size: 14pt; color: #666; margin-bottom: 24pt; }
+.note { background-color: #f0f7ff; border-left: 3pt solid #4a90d9; padding: 8pt 12pt; margin: 8pt 0; font-size: 10pt; }
+.tip { background-color: #f0fff0; border-left: 3pt solid #4a9; padding: 8pt 12pt; margin: 8pt 0; font-size: 10pt; }
+.warn { background-color: #fff8f0; border-left: 3pt solid #d4a040; padding: 8pt 12pt; margin: 8pt 0; font-size: 10pt; }
+code { font-family: Menlo, Courier New, monospace; font-size: 10pt; background-color: #f4f4f4; padding: 1pt 4pt; border-radius: 3pt; }
+.toc { margin: 16pt 0 24pt 0; }
+.toc a { text-decoration: none; color: #4a90d9; }
+.toc li { margin-bottom: 2pt; }
+</style>
+</head>
+<body>
+
+<h1>NeedleDrop</h1>
+<p class="subtitle">A macOS menu bar app for monitoring and controlling Sonos speakers</p>
+<p style="font-size: 10pt; color: #888;">Version 2 &mdash; User Guide</p>
+
+<br/>
+
+<div class="toc">
+<h3>Contents</h3>
+<ol>
+<li><a href="#features">Key Features</a></li>
+<li><a href="#install">Installation</a></li>
+<li><a href="#getting-started">Getting Started</a></li>
+<li><a href="#menu-bar">The Menu Bar Dropdown</a></li>
+<li><a href="#mini-player">Mini Player</a></li>
+<li><a href="#playback">Playback Controls &amp; Keyboard Shortcuts</a></li>
+<li><a href="#zones">Zones &amp; Speaker Grouping</a></li>
+<li><a href="#presets">Presets</a></li>
+<li><a href="#library">Saving Tracks to Your Library</a></li>
+<li><a href="#scrobbler">Scrobbling (Optional)</a></li>
+<li><a href="#settings">Settings Reference</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="features">1. Key Features</h2>
+
+<ul>
+<li><b>Menu bar integration</b> &mdash; Lives in your macOS menu bar. Click the icon to see what&rsquo;s playing, browse favorites, and control playback without switching apps.</li>
+<li><b>Floating mini player</b> &mdash; An always-on-top window showing the current track with album art, transport controls, and volume. Available in compact or large sizes with an optional transparent overlay mode.</li>
+<li><b>Track change banners</b> &mdash; Brief notification banners appear in the top-right corner when a new song starts.</li>
+<li><b>Full album art view</b> &mdash; Click any album art to see it at full resolution in a floating window.</li>
+<li><b>Zone management</b> &mdash; Switch between Sonos zones, group and ungroup speakers, and set per-speaker volumes.</li>
+<li><b>Presets</b> &mdash; Save your favorite combinations of station + speakers + volume as one-click presets. Supports multiple homes.</li>
+<li><b>Favorites</b> &mdash; Browse and play your Sonos favorites directly from the menu bar.</li>
+<li><b>Library integration</b> &mdash; Save the currently playing track to your Spotify or Apple Music library with one click.</li>
+<li><b>TV/HDMI audio support</b> &mdash; When your Sonos is playing TV audio, NeedleDrop adapts its display to show zone info and provides mute control instead of track skip.</li>
+<li><b>Global keyboard shortcuts</b> &mdash; Control playback, volume, and track skip from anywhere on your Mac.</li>
+<li><b>Launch at login</b> &mdash; Optionally start NeedleDrop automatically when you log in.</li>
+<li><b>Last.fm scrobbling (optional)</b> &mdash; Requires a separate NeedleDrop Scrobbler server running on your network. Not included in this distribution. See the <a href="#scrobbler">Scrobbling</a> section for details.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="install">2. Installation</h2>
+
+<h3>Requirements</h3>
+<ul>
+<li>macOS 13 (Ventura) or later</li>
+<li>Sonos speakers on the same local network as your Mac</li>
+</ul>
+
+<h3>Steps</h3>
+<ol>
+<li><b>Unzip</b> the downloaded <code>.zip</code> file. You should see <b>NeedleDrop.app</b>.</li>
+<li><b>Drag NeedleDrop.app</b> into your <code>/Applications</code> folder (or wherever you keep apps).</li>
+<li><b>Double-click</b> NeedleDrop to launch it. A small music-note icon will appear in your menu bar.</li>
+</ol>
+
+<div class="note">
+<b>First launch:</b> macOS may show a dialog saying the app is from an identified developer. Click <b>Open</b> to proceed. The app is signed and notarized with Apple.
+</div>
+
+<div class="tip">
+<b>Tip:</b> To have NeedleDrop start automatically when you log in, open Settings (gear icon in the dropdown) and enable <b>Launch at login</b>.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="getting-started">3. Getting Started</h2>
+
+<ol>
+<li><b>Launch NeedleDrop.</b> The app icon appears in your menu bar (top-right of your screen).</li>
+<li><b>Wait for speaker discovery.</b> NeedleDrop automatically discovers Sonos speakers on your local network. The zone pill (top-left of the dropdown) shows an orange dot while searching and turns green once connected.</li>
+<li><b>Name your home.</b> On first connection, NeedleDrop asks you to name this Sonos system (e.g., &ldquo;Home&rdquo; or &ldquo;Office&rdquo;). This helps organize presets if you use Sonos in multiple locations. You can skip this step.</li>
+<li><b>Start playing music</b> on any Sonos speaker using the Sonos app, AirPlay, or by selecting a favorite from the music menu (<b>&#9834; &#x25BE;</b> button).</li>
+<li><b>NeedleDrop displays what&rsquo;s playing</b> with album art, track info, and playback controls.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="menu-bar">4. The Menu Bar Dropdown</h2>
+
+<p>Click the NeedleDrop icon in your menu bar to open the dropdown. It has three areas:</p>
+
+<h3>Header</h3>
+<ul>
+<li><b>Zone pill</b> (left) &mdash; Shows the active zone name and connection status. Click to switch zones or group speakers.</li>
+<li><b>Music menu</b> (right, <b>&#9834; &#x25BE;</b>) &mdash; Browse favorites, activate presets, or create new presets.</li>
+</ul>
+
+<h3>Main Content</h3>
+<p>When connected and music is playing, you see:</p>
+<ul>
+<li>Album art (click to view full size)</li>
+<li>Track title, artist, and album</li>
+<li>Transport controls: previous, play/pause, next</li>
+<li>Heart button to save the track to Spotify or Apple Music</li>
+<li>Volume slider with mute button</li>
+<li>Progress bar</li>
+</ul>
+<p>When nothing is playing, you see &ldquo;Nothing playing&rdquo; with a music note icon. If speakers are still being discovered, you see a spinner and &ldquo;Searching&hellip;&rdquo;</p>
+
+<h3>Footer</h3>
+<table>
+<tr><th>Button</th><th>Description</th></tr>
+<tr><td>Picture-in-picture icon</td><td>Toggle the floating mini player window on/off</td></tr>
+<tr><td>Bell icon</td><td>Toggle track-change banner notifications on/off</td></tr>
+<tr><td>Gear icon</td><td>Open settings (speaker settings, scrobbling, library services)</td></tr>
+<tr><td>NeedleDrop v2</td><td>App version (informational)</td></tr>
+<tr><td>Quit</td><td>Quit the app</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="mini-player">5. Mini Player</h2>
+
+<p>The mini player is a floating, always-on-top window that shows what&rsquo;s currently playing. It never steals focus from other apps.</p>
+
+<h3>Showing and Hiding</h3>
+<ul>
+<li>Click the <b>picture-in-picture icon</b> in the dropdown footer, or</li>
+<li>Enable <b>Show on launch</b> in settings to have it appear automatically when NeedleDrop starts.</li>
+</ul>
+
+<h3>Moving the Window</h3>
+<p>Drag the title bar area at the top of the mini player to reposition it anywhere on your screen. NeedleDrop remembers the position.</p>
+
+<h3>Size Options</h3>
+<p>Choose between two sizes in Settings &gt; Mini Player Appearance:</p>
+
+<table>
+<tr><th>Size</th><th>Dimensions</th><th>Album Art</th><th>Best For</th></tr>
+<tr><td><b>Compact</b></td><td>300 &times; 120 px</td><td>56 &times; 56 px</td><td>Minimal footprint, quick glance</td></tr>
+<tr><td><b>Large</b></td><td>400 &times; 320 px</td><td>200 &times; 200 px</td><td>Prominent display with large album art</td></tr>
+</table>
+
+<h3>Transparent Overlay Mode</h3>
+<p>When <b>Transparent overlay</b> is enabled (the default):</p>
+<ul>
+<li>The mini player is nearly invisible when you&rsquo;re not interacting with it (content at ~12% opacity).</li>
+<li><b>Hover your cursor</b> over the window to reveal it with a dark translucent backdrop and white text.</li>
+<li><b>When a new song starts</b>, the player briefly reveals itself for 4 seconds, then fades back.</li>
+</ul>
+<p>When transparent mode is <b>off</b>, the mini player uses a solid system-material background and is always fully visible.</p>
+
+<h3>Mini Player Controls</h3>
+<p>The mini player includes the same controls as the main dropdown:</p>
+<ul>
+<li>Album art (click to enlarge)</li>
+<li>Track info (title, artist, album)</li>
+<li>Previous / Play-Pause / Next buttons</li>
+<li>Save-to-library button (heart icon)</li>
+<li>Volume slider with mute</li>
+<li>Progress bar (compact shows bar only; large shows timestamps)</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="playback">6. Playback Controls &amp; Keyboard Shortcuts</h2>
+
+<h3>On-Screen Controls</h3>
+<p>Transport buttons and the volume slider are available in both the menu bar dropdown and the mini player.</p>
+
+<h3>Global Keyboard Shortcuts</h3>
+<p>These work from anywhere on your Mac, even when NeedleDrop isn&rsquo;t focused:</p>
+
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><b>Space</b></td><td>Play / Pause</td></tr>
+<tr><td><b>Left Arrow</b></td><td>Previous track</td></tr>
+<tr><td><b>Right Arrow</b></td><td>Next track</td></tr>
+<tr><td><b>Up Arrow</b></td><td>Volume up (+5%)</td></tr>
+<tr><td><b>Down Arrow</b></td><td>Volume down (-5%)</td></tr>
+</table>
+
+<div class="note">
+<b>Note:</b> Keyboard shortcuts are temporarily disabled when a text field has focus (e.g., while editing a preset name).
+</div>
+
+<h3>TV / HDMI Audio</h3>
+<p>When your Sonos is receiving audio from a TV via HDMI (e.g., Sonos Beam or Arc), NeedleDrop adapts:</p>
+<ul>
+<li>Shows a TV icon instead of album art</li>
+<li>Displays the zone name and speaker count</li>
+<li>Previous/Next buttons are hidden</li>
+<li>Play/Pause acts as mute/unmute</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="zones">7. Zones &amp; Speaker Grouping</h2>
+
+<h3>Switching Zones</h3>
+<p>Click the <b>zone pill</b> (top-left of the dropdown) to see all available Sonos zones. Click a zone to make it the active one. A music-note icon indicates which zone is currently playing audio.</p>
+
+<h3>Default Zone</h3>
+<p>In Settings, you can set a <b>Default Zone</b>:</p>
+<ul>
+<li><b>Auto (follow active)</b> &mdash; NeedleDrop automatically switches to whichever zone starts playing. This is the default.</li>
+<li><b>A specific zone</b> &mdash; NeedleDrop always shows this zone, even if another one is playing.</li>
+</ul>
+
+<h3>Grouping Speakers</h3>
+<ol>
+<li>Click the <b>zone pill</b> to open the zone list.</li>
+<li>Click <b>Group Speakers&hellip;</b> at the bottom.</li>
+<li>Check the speakers you want to group with the primary speaker. The primary (coordinator) is always checked and cannot be unchecked.</li>
+<li>Adjust per-speaker volume using the sliders that appear below each checked speaker.</li>
+<li>Click <b>Done</b> to apply the changes.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="presets">8. Presets</h2>
+
+<p>Presets let you save a combination of <b>station + speakers + volume</b> and recall it with one click.</p>
+
+<h3>Creating a Preset</h3>
+<p>There are two ways to create a preset:</p>
+
+<p><b>From what&rsquo;s playing:</b></p>
+<ol>
+<li>While music is playing, click the <b>music menu</b> (<b>&#9834; &#x25BE;</b>).</li>
+<li>Select <b>Save What&rsquo;s Playing&hellip;</b></li>
+<li>The preset editor opens, pre-filled with the current station, active speakers, and volume.</li>
+<li>Give it a name and click <b>Create</b>.</li>
+</ol>
+
+<p><b>From scratch:</b></p>
+<ol>
+<li>Click the <b>music menu</b> and select <b>New Preset&hellip;</b></li>
+<li>Enter a name, pick a station from your Sonos favorites, select rooms, and optionally set a volume.</li>
+<li>Click <b>Create</b>.</li>
+</ol>
+
+<h3>Using a Preset</h3>
+<p>Click the <b>music menu</b> (<b>&#9834; &#x25BE;</b>) and select a preset from the <b>Presets</b> section. NeedleDrop will group the specified speakers, set the volume (if configured), and start playing the station.</p>
+
+<h3>Managing Presets</h3>
+<p>Click the <b>music menu</b> &gt; <b>Manage Presets&hellip;</b> to view, edit, or delete presets.</p>
+
+<div class="tip">
+<b>Multi-home support:</b> If you use Sonos in multiple locations (e.g., home and office), presets are automatically filtered to show only those for your current network.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="library">9. Saving Tracks to Your Library</h2>
+
+<p>NeedleDrop can save the currently playing track to your <b>Spotify</b> or <b>Apple Music</b> library.</p>
+
+<h3>Setup</h3>
+<ol>
+<li>Open the dropdown and click the <b>gear icon</b> to enter settings.</li>
+<li>Go to the <b>Services</b> tab.</li>
+<li><b>Spotify:</b> Enter your Spotify Client ID and click <b>Connect</b>. You&rsquo;ll be prompted to authorize in your browser.</li>
+<li><b>Apple Music:</b> Click <b>Connect</b>. macOS will ask for permission to access Apple Music. If you previously denied access, click <b>Open Settings</b> to grant it in System Settings &gt; Privacy &amp; Security &gt; Media &amp; Apple Music.</li>
+</ol>
+
+<div class="note">
+<b>Note:</b> Only one library service can be active at a time. Connecting one will disconnect the other.
+</div>
+
+<h3>Saving a Track</h3>
+<p>When a library service is connected, a <b>heart icon</b> appears next to the transport controls. Click it to save the current track. A filled red heart means the track has already been saved this session.</p>
+
+<!-- ============================================================ -->
+<h2 id="scrobbler">10. Scrobbling (Optional)</h2>
+
+<p>NeedleDrop supports <b>Last.fm scrobbling</b> through a separate companion server called the <b>NeedleDrop Scrobbler</b>. The scrobbler is <b>not included</b> in this distribution&mdash;it runs as a separate service on your network.</p>
+
+<h3>How It Works</h3>
+<ul>
+<li>NeedleDrop tracks how long you listen to each song locally.</li>
+<li>If a NeedleDrop Scrobbler server is running on your network, NeedleDrop discovers it automatically via Bonjour.</li>
+<li>The scrobbler server handles the actual Last.fm API communication.</li>
+<li>A <b>green checkmark</b> appears next to the track title when a song has been scrobbled. This badge only appears when the scrobbler server is connected.</li>
+</ul>
+
+<h3>Scrobbler Settings</h3>
+<p>In the dropdown settings, go to the <b>Scrobbling</b> tab:</p>
+<ul>
+<li><b>Discover</b> &mdash; Searches your local network for a running scrobbler.</li>
+<li><b>Check</b> &mdash; Tests the connection to the scrobbler.</li>
+<li><b>Disconnect</b> &mdash; Stops using the scrobbler.</li>
+<li><b>Filter rules</b> &mdash; When connected, you can set a minimum track duration and add artist/title patterns to exclude from scrobbling (useful for filtering ads or station breaks).</li>
+</ul>
+
+<div class="warn">
+<b>Without the scrobbler server:</b> NeedleDrop works perfectly fine. Scrobbling is entirely optional. All other features (playback control, presets, library saving, etc.) work independently.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="settings">11. Settings Reference</h2>
+
+<p>Open settings by clicking the <b>gear icon</b> in the dropdown footer. There are three tabs:</p>
+
+<h3>Speaker Tab</h3>
+<table>
+<tr><th>Setting</th><th>Description</th><th>Default</th></tr>
+<tr><td>Launch at login</td><td>Start NeedleDrop automatically when you log in to macOS</td><td>Off</td></tr>
+<tr><td>Show on launch</td><td>Open the mini player window when NeedleDrop starts</td><td>Off</td></tr>
+<tr><td>Transparent overlay</td><td>Mini player uses a transparent style that reveals on hover</td><td>On</td></tr>
+<tr><td>Size (Compact / Large)</td><td>Mini player window size</td><td>Compact</td></tr>
+<tr><td>Default Zone</td><td>Which zone to follow: Auto or a specific zone</td><td>Auto</td></tr>
+<tr><td>Speakers</td><td>Read-only list of discovered speakers with IP addresses</td><td>&mdash;</td></tr>
+</table>
+
+<h3>Scrobbling Tab</h3>
+<table>
+<tr><th>Setting</th><th>Description</th></tr>
+<tr><td>Connection status</td><td>Shows whether a scrobbler server is found on the network</td></tr>
+<tr><td>Discover / Check / Disconnect</td><td>Manage scrobbler connection</td></tr>
+<tr><td>Min duration</td><td>Minimum track length (seconds) before scrobbling. Default: 90</td></tr>
+<tr><td>Filter rules</td><td>Artist/Title patterns to exclude from scrobbling</td></tr>
+</table>
+
+<h3>Services Tab</h3>
+<table>
+<tr><th>Setting</th><th>Description</th></tr>
+<tr><td>Spotify</td><td>Connect with a Spotify Client ID to save tracks to your Spotify library</td></tr>
+<tr><td>Apple Music</td><td>Connect to save tracks to your Apple Music library (requires macOS permission)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="troubleshooting">12. Troubleshooting</h2>
+
+<h3>No speakers found</h3>
+<ul>
+<li>Make sure your Mac and Sonos speakers are on the same Wi-Fi network.</li>
+<li>Check that your firewall isn&rsquo;t blocking UPnP/SSDP discovery (UDP port 1900).</li>
+<li>Try quitting and relaunching NeedleDrop.</li>
+</ul>
+
+<h3>Menu bar icon is grayed out</h3>
+<p>This means NeedleDrop hasn&rsquo;t found any speakers yet. It will keep searching. Check your network connection.</p>
+
+<h3>Mini player is invisible</h3>
+<p>If transparent overlay mode is on, the mini player may be nearly invisible when nothing is playing. Hover your cursor over where you placed it, or toggle transparent mode off in settings to make it always visible.</p>
+
+<h3>Keyboard shortcuts not working</h3>
+<p>NeedleDrop&rsquo;s global keyboard shortcuts (Space, arrows) require Accessibility permission. If prompted, grant access in System Settings &gt; Privacy &amp; Security &gt; Accessibility.</p>
+
+<h3>Can&rsquo;t save tracks to library</h3>
+<ul>
+<li><b>Spotify:</b> Make sure your Client ID is correct and you&rsquo;ve completed the OAuth authorization in your browser.</li>
+<li><b>Apple Music:</b> Check that NeedleDrop has Media &amp; Apple Music permission in System Settings &gt; Privacy &amp; Security.</li>
+<li>Only one service can be active at a time.</li>
+</ul>
+
+<h3>Scrobbler not connecting</h3>
+<p>The NeedleDrop Scrobbler is a separate server application. Make sure it&rsquo;s running on the same network and advertising via Bonjour (<code>_needledrop._tcp</code>).</p>
+
+<br/>
+<hr/>
+<p style="font-size: 9pt; color: #999; text-align: center;">NeedleDrop v2 &mdash; Built with SwiftUI for macOS</p>
+
+</body>
+</html>

@@ -101,7 +101,7 @@ struct NowPlayingView: View {
                                 .layoutPriority(-1)
                         }
 
-                        if appState.scrobbleTracker.isScrobbled(track.id) {
+                        if appState.scrobbleTracker.isScrobbled(track.id) && appState.scrobblerClient.config != nil {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.caption2)
                                 .foregroundColor(.green)

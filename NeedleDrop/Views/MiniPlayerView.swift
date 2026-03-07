@@ -144,7 +144,7 @@ struct MiniPlayerView: View {
                             .shadow(color: shadow, radius: 2)
                             .fixedSize()
                             .help("Scrobbled")
-                            .opacity(appState.scrobbleTracker.isScrobbled(track.id) ? 1 : 0)
+                            .opacity(appState.scrobbleTracker.isScrobbled(track.id) && appState.scrobblerClient.config != nil ? 1 : 0)
                     }
                 }
             }
@@ -267,7 +267,7 @@ struct MiniPlayerView: View {
                         .shadow(color: shadow, radius: 2)
                         .fixedSize()
                         .help("Scrobbled")
-                        .opacity(appState.scrobbleTracker.isScrobbled(track.id) ? 1 : 0)
+                        .opacity(appState.scrobbleTracker.isScrobbled(track.id) && appState.scrobblerClient.config != nil ? 1 : 0)
                 }
             }
         }
