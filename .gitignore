@@ -20,6 +20,9 @@ DerivedData/
 # Config with secrets
 config.toml
 
+# Launchd plists (contain local paths)
+scrobbler/*.plist
+
 # Claude Code
 .claude/
 

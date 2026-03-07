@@ -7,12 +7,12 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/lee/Projects/NeedleDrop2/scrobbler/.venv/bin/needledrop</string>
+        <string>/path/to/NeedleDrop/scrobbler/.venv/bin/needledrop</string>
         <string>run</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/lee/Projects/NeedleDrop2/scrobbler</string>
+    <string>/path/to/NeedleDrop/scrobbler</string>
 
     <key>KeepAlive</key>
     <true/>
@@ -21,10 +21,10 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/lee/.config/needledrop/logs/stdout.log</string>
+    <string>~/.config/needledrop/logs/stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/lee/.config/needledrop/logs/stderr.log</string>
+    <string>~/.config/needledrop/logs/stderr.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
