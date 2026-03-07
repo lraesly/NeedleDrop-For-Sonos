@@ -79,6 +79,7 @@ final class AppState: ObservableObject {
     /// Track duration in seconds from GetPositionInfo (updated by polling).
     @Published var playbackDuration: Int = 0
     private var positionPollingTask: Task<Void, Never>?
+    private var zoneTopologyPollingTask: Task<Void, Never>?
 
     /// Local elapsed counter for radio/streaming tracks where GetPositionInfo
     /// returns duration 0 but event metadata has the track duration.
@@ -273,6 +274,7 @@ final class AppState: ObservableObject {
             guard let self else { return }
             Task { @MainActor in
                 await self.eventHandler.unsubscribe()
+                self.stopZoneTopologyPolling()
                 // Clear session-level caches to reclaim memory during sleep
                 self.scrobbleTracker.scrobbledTrackIds.removeAll()
                 self.savedTrackIds.removeAll()
@@ -293,6 +295,7 @@ final class AppState: ObservableObject {
                 // to let the network come back up
                 try? await Task.sleep(for: .seconds(2))
                 self.resubscribeToActiveZone()
+                self.startZoneTopologyPolling()
             }
         }
     }
@@ -379,10 +382,12 @@ final class AppState: ObservableObject {
 
                     // Load zones, favorites, and subscribe to events
                     self.onConnected()
+                    self.startZoneTopologyPolling()
                 } else if speakers.isEmpty && self.connectionState == .connected {
                     // Speakers disappeared (network change, wake, etc.)
                     // Discovery has already restarted, so transition to .discovering
                     self.connectionState = .discovering
+                    self.stopZoneTopologyPolling()
                     log.info("Speakers lost — transitioning to discovering")
                 }
 
@@ -1147,6 +1152,51 @@ final class AppState: ObservableObject {
         positionPollingTask = nil
         playbackPosition = 0
         playbackDuration = 0
+    }
+
+    // MARK: - Zone Topology Polling
+
+    /// Periodically polls Sonos for zone topology changes made externally
+    /// (e.g., Sonos app regrouping, TV stealing a soundbar via HDMI).
+    /// Runs every 30 seconds while connected.
+    private func startZoneTopologyPolling() {
+        guard zoneTopologyPollingTask == nil else { return }
+        log.debug("Starting zone topology polling")
+        zoneTopologyPollingTask = Task { @MainActor [weak self] in
+            defer { self?.zoneTopologyPollingTask = nil }
+            // Brief initial delay — don't poll immediately after connect
+            // since onConnected() already fetches topology
+            try? await Task.sleep(for: .seconds(30))
+
+            while !Task.isCancelled {
+                guard let self, !self.zones.isEmpty else { break }
+
+                let ip = self.speakers.first?.ip
+                    ?? self.allTopologySpeakers.first?.ip
+                    ?? self.discoveryService.cachedSpeakerIP
+                if let ip {
+                    let groups = await self.zoneManager.getZoneGroups(speakerIP: ip)
+                    if groups != self.zones {
+                        log.info("Zone topology changed externally — updating")
+                        self.zones = groups
+
+                        // If the active zone's coordinator is no longer in the
+                        // topology (e.g., speaker was removed from group and
+                        // became a standalone zone), the UI will reflect this
+                        // automatically via the activeZone computed property.
+                    }
+                }
+
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    private func stopZoneTopologyPolling() {
+        guard zoneTopologyPollingTask != nil else { return }
+        log.debug("Stopping zone topology polling")
+        zoneTopologyPollingTask?.cancel()
+        zoneTopologyPollingTask = nil
     }
 
     // MARK: - Presets
