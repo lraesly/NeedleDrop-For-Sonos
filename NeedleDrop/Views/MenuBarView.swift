@@ -5,6 +5,7 @@ struct MenuBarView: View {
     @State private var showSetup = false
     @State private var setupTab = 0
     @State private var newHomeName = ""
+    @FocusState private var homeNameFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +24,8 @@ struct MenuBarView: View {
             // Content
             if appState.speakers.isEmpty {
                 SonosSetupView()
+            } else if appState.pendingHomeNaming {
+                homeNamingContent
             } else if showSetup {
                 setupContent
             } else {
@@ -39,13 +42,6 @@ struct MenuBarView: View {
             set: { if !$0 { DispatchQueue.main.async { appState.presetNav = nil } } }
         )) {
             presetPopoverContent
-        }
-        .alert("Name This Home", isPresented: $appState.pendingHomeNaming) {
-            TextField("e.g. Bethesda, Beach House", text: $newHomeName)
-            Button("Save") { saveHomeName() }
-            Button("Skip", role: .cancel) { saveHomeName() }
-        } message: {
-            Text("Give this Sonos system a name so presets can be organized by home.")
         }
     }
 
@@ -173,6 +169,39 @@ struct MenuBarView: View {
     }
 
     // MARK: - Home Naming
+
+    @ViewBuilder
+    private var homeNamingContent: some View {
+        VStack(spacing: 12) {
+            Text("Name This Home")
+                .font(.headline)
+
+            Text("Give this Sonos system a name so presets can be organized by home.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            TextField("e.g. Bethesda, Beach House", text: $newHomeName)
+                .textFieldStyle(.roundedBorder)
+                .focused($homeNameFieldFocused)
+                .onSubmit { saveHomeName() }
+
+            HStack {
+                Button("Skip") { saveHomeName() }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+
+                Spacer()
+
+                Button("Save") { saveHomeName() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+        .padding(16)
+        .onAppear { homeNameFieldFocused = true }
+    }
 
     private func saveHomeName() {
         guard let id = appState.currentHouseholdId else { return }
