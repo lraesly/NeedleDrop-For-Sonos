@@ -50,7 +50,7 @@ final class SonosZoneManager {
             }
 
             let groups = ZoneGroupTopologyParser.parse(data)
-            log.info("Found \(groups.count) zone group(s)")
+            log.debug("Found \(groups.count) zone group(s)")
             return groups
         } catch {
             log.error("ZoneGroupTopology request error: \(error.localizedDescription)")

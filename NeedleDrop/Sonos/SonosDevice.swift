@@ -29,4 +29,12 @@ struct SonosZoneGroup: Identifiable, Equatable {
 
     var id: String { coordinator.uuid }
     var roomName: String { coordinator.roomName }
+
+    /// Order-independent equality: Sonos may return members in different order
+    /// between topology polls. Without this, `@Published var zones` would fire
+    /// `objectWillChange` on every poll, causing unnecessary SwiftUI redraws.
+    static func == (lhs: SonosZoneGroup, rhs: SonosZoneGroup) -> Bool {
+        lhs.coordinator == rhs.coordinator
+            && Set(lhs.members.map(\.uuid)) == Set(rhs.members.map(\.uuid))
+    }
 }

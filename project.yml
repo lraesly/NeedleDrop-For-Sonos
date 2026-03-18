@@ -11,6 +11,9 @@ settings:
 packages:
   SwiftUPnP:
     path: LocalPackages/SwiftUPnP
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "7.0.0"
 targets:
   NeedleDrop:
     type: application
@@ -29,3 +32,4 @@ targets:
       ENABLE_PREVIEWS: YES
     dependencies:
       - package: SwiftUPnP
+      - package: GRDB

@@ -211,6 +211,7 @@ struct MenuBarView: View {
             : trimmed
         appState.homeStore.addHome(householdId: id, name: name)
         newHomeName = ""
+        appState.pendingHomeNaming = false
     }
 
     // MARK: - Preset Popover

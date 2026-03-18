@@ -51,6 +51,19 @@ final class SpeakerStore {
         let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
         cached.removeAll { $0.lastSeen < cutoff }
 
+        // Purge stale entries on different subnets — if the device we just
+        // cached is on 192.168.2.x, remove entries on 192.168.1.x etc.
+        let parts = device.ip.split(separator: ".")
+        if parts.count == 4 {
+            let activeSubnet = "\(parts[0]).\(parts[1]).\(parts[2])."
+            let before = cached.count
+            cached.removeAll { !$0.ip.hasPrefix(activeSubnet) }
+            let removed = before - cached.count
+            if removed > 0 {
+                log.info("Purged \(removed) cached speaker(s) from stale subnets")
+            }
+        }
+
         save(cached)
     }
 

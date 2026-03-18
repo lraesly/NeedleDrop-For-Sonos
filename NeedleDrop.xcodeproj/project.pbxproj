@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -14,10 +14,15 @@
 		1B191836B973E5D45D820820 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1443E76259D1E7FBCEE18293 /* Assets.xcassets */; };
 		205491EE3B8B3F1AA051C554 /* AlbumArtEnricher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB528875D8BA9805328C5FA /* AlbumArtEnricher.swift */; };
 		2222057EA35627128333FB0D /* ScrobblerConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02ED43C4E7FAE04B18EF7425 /* ScrobblerConfigView.swift */; };
+		236D0E0087784FCB0A055EC7 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6520A3B38EE0E7C1182E0DA4 /* DatabaseManager.swift */; };
+		2709F0C6B6CCD1BF876D4ABA /* HoverButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AFDC3FA4B38B861C49C42C /* HoverButtonStyle.swift */; };
 		2B00485A1DD22E7286ECEDC7 /* ScrobbleFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF3A68F138FFDC19D45C408 /* ScrobbleFiltersView.swift */; };
+		31029DAEC50CC4CB2792B474 /* DatabaseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B495948CB2D4073156AF5D55 /* DatabaseModels.swift */; };
+		3113C81A8069BEBEE9A279EB /* AppleMusicPlayCountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE79D68656F679AD73D777AF /* AppleMusicPlayCountService.swift */; };
 		37D08660301F2699672D7391 /* ScrobbleTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC58B577AB4491B89054B6D /* ScrobbleTracker.swift */; };
 		3A35A714485EE5CD681816FC /* SonosZoneManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4686C2723536A69495CED86 /* SonosZoneManager.swift */; };
 		3FA27FD3A4DABEA360194D83 /* MiniPlayerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9566150C702C09E83917C9 /* MiniPlayerWindow.swift */; };
+		408AF9DA11E24692911F6757 /* HomeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B81F7860A50C483EB584E87 /* HomeStore.swift */; };
 		4B6F178EF4BBB1D447B1814F /* ZonePillButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2B5740EEAB79A3B384BED0 /* ZonePillButton.swift */; };
 		4FF3957F4576EC8459948B6E /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E4F80A67654C669EA5EBA3 /* MiniPlayerView.swift */; };
 		57F67A043B869D473C544F2A /* SwiftUPnP in Frameworks */ = {isa = PBXBuildFile; productRef = 0E9AF30BB88D9BCFFFA1CB61 /* SwiftUPnP */; };
@@ -29,16 +34,18 @@
 		78157FF006CEC67D55DE9E31 /* ScrobblerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */; };
 		790828A24859206D39C3174B /* SonosController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2974494EA705440203B6F2D1 /* SonosController.swift */; };
 		7990319A0C3E59CD74A3AA90 /* PresetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8589D1B4861B4E4197AB7359 /* PresetEditorView.swift */; };
+		7D0C3A6D9D2A36FDEE30C3D2 /* PlaySessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBB05B85D3DAF3C2E3522E31 /* PlaySessionManager.swift */; };
 		80375D8B839AE78B5574F3B1 /* BannerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDEF96910AE9BB7589E36444 /* BannerWindow.swift */; };
 		83B9DD2622D669B5F7884A18 /* MusicMenuButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09A392F8D6884A717C985DB /* MusicMenuButton.swift */; };
-		E1C4D9A73B8F02E5A9D61742 /* HomeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F82E6D19C7B3058E4DA9F1 /* HomeStore.swift */; };
 		89EB273022E901D96C581521 /* LibraryServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B572D69E203C6D3A750799D8 /* LibraryServicesView.swift */; };
 		92D967CDA852A4B63EEA9590 /* ScrobblerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33199DA88F53A200D667D909 /* ScrobblerConfig.swift */; };
 		97339D61FCD856521F114064 /* BannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54125E724C8878E6922EFA2 /* BannerView.swift */; };
 		A3916CBE8BCF61DA9EB02024 /* SonosDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F43C02427C88A2826E44CCC /* SonosDevice.swift */; };
 		C1EE98305F9653663B0AF9F4 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA2C4CCF28436F9BF864750 /* AppState.swift */; };
+		C5B200228380F1C9E81F927B /* AppleMusicActionQueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B247C1323D89DA7030146CE7 /* AppleMusicActionQueueRepository.swift */; };
 		C63150373B10C2BDEF6BF3F9 /* AppleMusicService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFEDDE8C505C123E64F4AFB /* AppleMusicService.swift */; };
 		C8C63FD425E05360F605E0CA /* SpotifyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E0D9447B4CFE9FE84473CB /* SpotifyService.swift */; };
+		C9C4B86438B59CDFFEB77894 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 2E4C7F0868B96D5F6445DFD3 /* GRDB */; };
 		CCDEDAEBE154A5DB8321651E /* NowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE64121A09DBA9CACA1F40E /* NowPlaying.swift */; };
 		D39541815397FDE6D0AB559F /* OAuthCallbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEAFF3D6F051F80D83426C47 /* OAuthCallbackServer.swift */; };
 		D3B56DFADB6715A1E82F70BB /* PresetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FDA6F12A80CA2863A25F18 /* PresetStore.swift */; };
@@ -52,12 +59,12 @@
 		F13EBE3B87165580A2033858 /* NeedleDropApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46BD615FE68D7866C5B6935E /* NeedleDropApp.swift */; };
 		F30D0272A5213C9D1495967D /* SpeakerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D230684B28857E27B1C68B /* SpeakerSettingsView.swift */; };
 		F412AC16031BF6CA790398D4 /* DIDLLiteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D436FDFA48E09C8B5A3F1622 /* DIDLLiteParser.swift */; };
-		F2E1D0C9B8A7F6E5D4C3B2A1 /* HoverButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* HoverButtonStyle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		02ED43C4E7FAE04B18EF7425 /* ScrobblerConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerConfigView.swift; sourceTree = "<group>"; };
 		08A3E78F7AA011B1F268979B /* LastChangeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastChangeParser.swift; sourceTree = "<group>"; };
+		0B81F7860A50C483EB584E87 /* HomeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStore.swift; sourceTree = "<group>"; };
 		0DB164BED375C9AA33F8229E /* PresetListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetListView.swift; sourceTree = "<group>"; };
 		1443E76259D1E7FBCEE18293 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1B2B5740EEAB79A3B384BED0 /* ZonePillButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZonePillButton.swift; sourceTree = "<group>"; };
@@ -77,6 +84,7 @@
 		60B209AB300C57756C104789 /* SonosEventHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosEventHandler.swift; sourceTree = "<group>"; };
 		61D230684B28857E27B1C68B /* SpeakerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerSettingsView.swift; sourceTree = "<group>"; };
 		64FDA6F12A80CA2863A25F18 /* PresetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetStore.swift; sourceTree = "<group>"; };
+		6520A3B38EE0E7C1182E0DA4 /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
 		6F43C02427C88A2826E44CCC /* SonosDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosDevice.swift; sourceTree = "<group>"; };
 		7B70466FE8253BB3443429E0 /* Zone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Zone.swift; sourceTree = "<group>"; };
 		806DC32213FDE90D6FCC2029 /* Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library.swift; sourceTree = "<group>"; };
@@ -86,25 +94,29 @@
 		8B10461A6851FD540D8D465E /* NeedleDrop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NeedleDrop.entitlements; sourceTree = "<group>"; };
 		8ED38A60ACA9C3387F6DAD4C /* Preset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preset.swift; sourceTree = "<group>"; };
 		8EF3A68F138FFDC19D45C408 /* ScrobbleFiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobbleFiltersView.swift; sourceTree = "<group>"; };
+		9B067A1A2F64C19F00D89DBE /* copy_to_applications.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = copy_to_applications.sh; sourceTree = "<group>"; };
 		9EB056E3AC30B6C93CB2C7C0 /* SonosSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosSetupView.swift; sourceTree = "<group>"; };
 		A54125E724C8878E6922EFA2 /* BannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerView.swift; sourceTree = "<group>"; };
 		A7ED3CDE9C927D06D18783FA /* CachedAsyncImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAsyncImage.swift; sourceTree = "<group>"; };
-		A4F82E6D19C7B3058E4DA9F1 /* HomeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStore.swift; sourceTree = "<group>"; };
 		ACE64121A09DBA9CACA1F40E /* NowPlaying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlaying.swift; sourceTree = "<group>"; };
+		B247C1323D89DA7030146CE7 /* AppleMusicActionQueueRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicActionQueueRepository.swift; sourceTree = "<group>"; };
 		B4686C2723536A69495CED86 /* SonosZoneManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosZoneManager.swift; sourceTree = "<group>"; };
+		B495948CB2D4073156AF5D55 /* DatabaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseModels.swift; sourceTree = "<group>"; };
 		B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerClient.swift; sourceTree = "<group>"; };
 		B572D69E203C6D3A750799D8 /* LibraryServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryServicesView.swift; sourceTree = "<group>"; };
 		B8A66B0457F14459263C314E /* SpeakerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerStore.swift; sourceTree = "<group>"; };
 		BFBF8817129DF1CEE2F9AFA8 /* AlbumArtWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtWindow.swift; sourceTree = "<group>"; };
 		CAB727278D513446306A7CD7 /* PlaybackProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackProgressBar.swift; sourceTree = "<group>"; };
+		CBB05B85D3DAF3C2E3522E31 /* PlaySessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaySessionManager.swift; sourceTree = "<group>"; };
 		CE80BE729E23FD680EA93EAC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D09A392F8D6884A717C985DB /* MusicMenuButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicMenuButton.swift; sourceTree = "<group>"; };
 		D436FDFA48E09C8B5A3F1622 /* DIDLLiteParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DIDLLiteParser.swift; sourceTree = "<group>"; };
+		E1AFDC3FA4B38B861C49C42C /* HoverButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverButtonStyle.swift; sourceTree = "<group>"; };
 		EDA2C4CCF28436F9BF864750 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		EE79D68656F679AD73D777AF /* AppleMusicPlayCountService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicPlayCountService.swift; sourceTree = "<group>"; };
 		FDEF96910AE9BB7589E36444 /* BannerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerWindow.swift; sourceTree = "<group>"; };
 		FEAFF3D6F051F80D83426C47 /* OAuthCallbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthCallbackServer.swift; sourceTree = "<group>"; };
 		FEB678BE61E4D956232686CF /* SwiftUPnP */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftUPnP; path = LocalPackages/SwiftUPnP; sourceTree = SOURCE_ROOT; };
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* HoverButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverButtonStyle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,6 +125,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				57F67A043B869D473C544F2A /* SwiftUPnP in Frameworks */,
+				C9C4B86438B59CDFFEB77894 /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +152,16 @@
 				FEB678BE61E4D956232686CF /* SwiftUPnP */,
 			);
 			name = Packages;
+			sourceTree = "<group>";
+		};
+		2BACECD59207DF6C303776D6 /* Database */ = {
+			isa = PBXGroup;
+			children = (
+				B247C1323D89DA7030146CE7 /* AppleMusicActionQueueRepository.swift */,
+				6520A3B38EE0E7C1182E0DA4 /* DatabaseManager.swift */,
+				B495948CB2D4073156AF5D55 /* DatabaseModels.swift */,
+			);
+			path = Database;
 			sourceTree = "<group>";
 		};
 		43DBC4435CB03C3754583672 /* Resources */ = {
@@ -170,9 +193,9 @@
 				A54125E724C8878E6922EFA2 /* BannerView.swift */,
 				FDEF96910AE9BB7589E36444 /* BannerWindow.swift */,
 				A7ED3CDE9C927D06D18783FA /* CachedAsyncImage.swift */,
+				E1AFDC3FA4B38B861C49C42C /* HoverButtonStyle.swift */,
 				B572D69E203C6D3A750799D8 /* LibraryServicesView.swift */,
 				2BB4F2F14D57DD8F085E6C7C /* MenuBarView.swift */,
-				A1B2C3D4E5F6A7B8C9D0E1F2 /* HoverButtonStyle.swift */,
 				35E4F80A67654C669EA5EBA3 /* MiniPlayerView.swift */,
 				1D9566150C702C09E83917C9 /* MiniPlayerWindow.swift */,
 				D09A392F8D6884A717C985DB /* MusicMenuButton.swift */,
@@ -193,9 +216,11 @@
 			isa = PBXGroup;
 			children = (
 				1BB528875D8BA9805328C5FA /* AlbumArtEnricher.swift */,
+				EE79D68656F679AD73D777AF /* AppleMusicPlayCountService.swift */,
 				3DFEDDE8C505C123E64F4AFB /* AppleMusicService.swift */,
-				A4F82E6D19C7B3058E4DA9F1 /* HomeStore.swift */,
+				0B81F7860A50C483EB584E87 /* HomeStore.swift */,
 				FEAFF3D6F051F80D83426C47 /* OAuthCallbackServer.swift */,
+				CBB05B85D3DAF3C2E3522E31 /* PlaySessionManager.swift */,
 				64FDA6F12A80CA2863A25F18 /* PresetStore.swift */,
 				B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */,
 				5CC58B577AB4491B89054B6D /* ScrobbleTracker.swift */,
@@ -211,6 +236,7 @@
 				EADD7E1A38A459AFF0A58BCF /* NeedleDrop */,
 				24A828F9F349DE2A1228EE95 /* Packages */,
 				EAA2FCC5D79FA4E3287640D1 /* Products */,
+				9B067A1A2F64C19F00D89DBE /* copy_to_applications.sh */,
 			);
 			sourceTree = "<group>";
 		};
@@ -237,6 +263,7 @@
 				CE80BE729E23FD680EA93EAC /* Info.plist */,
 				8B10461A6851FD540D8D465E /* NeedleDrop.entitlements */,
 				DF08EDE6B75F363CEFCF5929 /* App */,
+				2BACECD59207DF6C303776D6 /* Database */,
 				7F1EB9A45981FBF1B8811F39 /* Models */,
 				43DBC4435CB03C3754583672 /* Resources */,
 				8908B459AE174074C82A3F52 /* Services */,
@@ -256,6 +283,7 @@
 				65A9B0A14785B12688A1FE7E /* Sources */,
 				9D3C04D5B5999F259B058590 /* Resources */,
 				65EE8EDE53003DD2D5F61B43 /* Frameworks */,
+				9B067A1B2F65C17900D89DBE /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -264,6 +292,7 @@
 			name = NeedleDrop;
 			packageProductDependencies = (
 				0E9AF30BB88D9BCFFFA1CB61 /* SwiftUPnP */,
+				2E4C7F0868B96D5F6445DFD3 /* GRDB */,
 			);
 			productName = NeedleDrop;
 			productReference = 4E3AC60E3168740DE3A6F79B /* NeedleDrop.app */;
@@ -279,7 +308,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					A01D6ED21C171622D4472CDA = {
-						DevelopmentTeam = A52FG8L4Z8;
+						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -295,9 +324,9 @@
 			mainGroup = A86D4A8E8A2BB43323D19847;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */,
 				1B8D00BA251E6AC39EB35F64 /* XCLocalSwiftPackageReference "LocalPackages/SwiftUPnP" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -317,6 +346,27 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		9B067A1B2F65C17900D89DBE /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cp -R \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\" /Applications/\n# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		65A9B0A14785B12688A1FE7E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -325,18 +375,22 @@
 				205491EE3B8B3F1AA051C554 /* AlbumArtEnricher.swift in Sources */,
 				07ABB705CAA6B1A4777E34F1 /* AlbumArtWindow.swift in Sources */,
 				C1EE98305F9653663B0AF9F4 /* AppState.swift in Sources */,
+				C5B200228380F1C9E81F927B /* AppleMusicActionQueueRepository.swift in Sources */,
+				3113C81A8069BEBEE9A279EB /* AppleMusicPlayCountService.swift in Sources */,
 				C63150373B10C2BDEF6BF3F9 /* AppleMusicService.swift in Sources */,
 				97339D61FCD856521F114064 /* BannerView.swift in Sources */,
 				80375D8B839AE78B5574F3B1 /* BannerWindow.swift in Sources */,
 				E48CB5209FAE58EC00135693 /* CachedAsyncImage.swift in Sources */,
 				F412AC16031BF6CA790398D4 /* DIDLLiteParser.swift in Sources */,
+				236D0E0087784FCB0A055EC7 /* DatabaseManager.swift in Sources */,
+				31029DAEC50CC4CB2792B474 /* DatabaseModels.swift in Sources */,
 				65E4A3CC245B5DDA6CCAC1A1 /* Favorites.swift in Sources */,
-				E1C4D9A73B8F02E5A9D61742 /* HomeStore.swift in Sources */,
+				408AF9DA11E24692911F6757 /* HomeStore.swift in Sources */,
+				2709F0C6B6CCD1BF876D4ABA /* HoverButtonStyle.swift in Sources */,
 				1A8FC0A2AAB18459EC017267 /* LastChangeParser.swift in Sources */,
 				DEC70E4A13DF0526E15C4FA6 /* Library.swift in Sources */,
 				89EB273022E901D96C581521 /* LibraryServicesView.swift in Sources */,
 				63BA123722FE4F8F75FE36E7 /* MenuBarView.swift in Sources */,
-				F2E1D0C9B8A7F6E5D4C3B2A1 /* HoverButtonStyle.swift in Sources */,
 				4FF3957F4576EC8459948B6E /* MiniPlayerView.swift in Sources */,
 				3FA27FD3A4DABEA360194D83 /* MiniPlayerWindow.swift in Sources */,
 				83B9DD2622D669B5F7884A18 /* MusicMenuButton.swift in Sources */,
@@ -344,6 +398,7 @@
 				CCDEDAEBE154A5DB8321651E /* NowPlaying.swift in Sources */,
 				5FFD05F907D74FCD362A10FA /* NowPlayingView.swift in Sources */,
 				D39541815397FDE6D0AB559F /* OAuthCallbackServer.swift in Sources */,
+				7D0C3A6D9D2A36FDEE30C3D2 /* PlaySessionManager.swift in Sources */,
 				E339B0F84B208FF1E750153B /* PlaybackProgressBar.swift in Sources */,
 				0E2DB97CACAEFCEBC7E2610B /* Preset.swift in Sources */,
 				7990319A0C3E59CD74A3AA90 /* PresetEditorView.swift in Sources */,
@@ -379,7 +434,7 @@
 				CODE_SIGN_ENTITLEMENTS = NeedleDrop/NeedleDrop.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = A52FG8L4Z8;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = NeedleDrop/Info.plist;
@@ -400,7 +455,7 @@
 				CODE_SIGN_ENTITLEMENTS = NeedleDrop/NeedleDrop.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = A52FG8L4Z8;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = NeedleDrop/Info.plist;
@@ -565,10 +620,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		0E9AF30BB88D9BCFFFA1CB61 /* SwiftUPnP */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftUPnP;
+		};
+		2E4C7F0868B96D5F6445DFD3 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

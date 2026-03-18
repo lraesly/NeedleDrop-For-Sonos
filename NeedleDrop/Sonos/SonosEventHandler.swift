@@ -119,7 +119,7 @@ final class SonosEventHandler: ObservableObject {
         lastAVTransportURI = nil
         stationArtURL = nil
         currentMediaTitle = nil
-        lastEventTime = nil
+        lastEventTime = Date()
 
         // Subscribe to UPnP events (HTTP SUBSCRIBE)
         await service.subscribeToEvents()
@@ -161,6 +161,7 @@ final class SonosEventHandler: ObservableObject {
         avTransportService = nil
         subscribedDevice = nil
         subscribedSpeakerIP = nil
+        lastEventTime = nil
     }
 
     /// Re-subscribe to the current device's events without changing devices.
@@ -200,7 +201,7 @@ final class SonosEventHandler: ObservableObject {
             }
             .store(in: &cancellables)
 
-        lastEventTime = nil  // Reset — expect a fresh event soon
+        lastEventTime = Date()  // Reset — expect a fresh event soon
 
         log.info("Resubscribed to \(zoneName)")
 

@@ -71,6 +71,9 @@ final class AppState: ObservableObject {
     @Published var savedTrackIds: Set<String> = []
     /// Track ID currently being saved (for in-progress heart animation).
     @Published var savingTrackId: String?
+    /// Brief warning shown near the heart button (e.g., "Apple Music disconnected").
+    /// Auto-clears after a few seconds.
+    @Published var saveWarningMessage: String?
 
     // MARK: - Playback Position
 
@@ -80,6 +83,9 @@ final class AppState: ObservableObject {
     @Published var playbackDuration: Int = 0
     private var positionPollingTask: Task<Void, Never>?
     private var zoneTopologyPollingTask: Task<Void, Never>?
+    private var eventWatchdogTask: Task<Void, Never>?
+    /// Timestamp of the last watchdog resubscribe attempt (throttles to once per 120s).
+    private var lastWatchdogResubscribeAttempt: Date?
 
     /// Local elapsed counter for radio/streaming tracks where GetPositionInfo
     /// returns duration 0 but event metadata has the track duration.
@@ -95,6 +101,15 @@ final class AppState: ObservableObject {
 
     let scrobblerClient = ScrobblerClient()
     let scrobbleTracker = ScrobbleTracker()
+
+    // MARK: - Database & Play Session
+
+    let playSessionManager: PlaySessionManager
+    let appleMusicPlayCountService: AppleMusicPlayCountService
+
+    /// Debounce task for volume SOAP calls — coalesces rapid slider drags
+    /// so we don't flood the speaker with one SOAP call per pixel.
+    private var volumeDebounceTask: Task<Void, Never>?
 
     // MARK: - Mini Player
 
@@ -219,12 +234,31 @@ final class AppState: ObservableObject {
     // MARK: - Init
 
     init() {
+        // Initialize database and play session services
+        let dbPool = DatabaseManager.shared.dbPool
+        playSessionManager = PlaySessionManager(dbPool: dbPool)
+        appleMusicPlayCountService = AppleMusicPlayCountService(dbPool: dbPool)
+
+        // Forward music service state changes to AppState so views re-render
+        // when canSaveToLibrary changes (e.g. auth status, isConnected).
+        spotifyService.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        appleMusicService.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
         setupBindings()
         startDiscovery()
         scrobblerClient.loadPersistedConfig()
         preventAppNap()
         setupSleepWakeObservers()
         setupKeyboardShortcuts()
+
+        // Start Apple Music play count queue processing
+        appleMusicPlayCountService.startDraining()
 
         if launchMiniPlayerOnStart {
             Task { @MainActor [weak self] in
@@ -273,8 +307,12 @@ final class AppState: ObservableObject {
             log.info("System sleep — unsubscribing from events, clearing caches")
             guard let self else { return }
             Task { @MainActor in
+                // Close active play session before sleep
+                self.playSessionManager.closeActiveSession(reason: "app_sleep")
+
                 await self.eventHandler.unsubscribe()
                 self.stopZoneTopologyPolling()
+                self.stopEventWatchdog()
                 // Clear session-level caches to reclaim memory during sleep
                 self.scrobbleTracker.scrobbledTrackIds.removeAll()
                 self.savedTrackIds.removeAll()
@@ -296,6 +334,7 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(for: .seconds(2))
                 self.resubscribeToActiveZone()
                 self.startZoneTopologyPolling()
+                self.startEventWatchdog()
             }
         }
     }
@@ -383,11 +422,13 @@ final class AppState: ObservableObject {
                     // Load zones, favorites, and subscribe to events
                     self.onConnected()
                     self.startZoneTopologyPolling()
+                    self.startEventWatchdog()
                 } else if speakers.isEmpty && self.connectionState == .connected {
                     // Speakers disappeared (network change, wake, etc.)
                     // Discovery has already restarted, so transition to .discovering
                     self.connectionState = .discovering
                     self.stopZoneTopologyPolling()
+                    self.stopEventWatchdog()
                     log.info("Speakers lost — transitioning to discovering")
                 }
 
@@ -444,6 +485,16 @@ final class AppState: ObservableObject {
                         durationSeconds: nowPlaying.track?.durationSeconds ?? 0
                     )
                 }
+
+                // Feed play session manager (determines qualified plays, enqueues Apple Music play counts)
+                let trackInLibrary = nowPlaying.track.map { self.savedTrackIds.contains($0.id) } ?? false
+                self.playSessionManager.onStateChange(
+                    trackId: nowPlaying.track?.id,
+                    track: nowPlaying.track,
+                    transportState: nowPlaying.transportState,
+                    householdId: self.currentHouseholdId,
+                    isTrackInLibrary: trackInLibrary
+                )
 
                 // Detect track change for banner + mini player flash (skip DJ segments)
                 if let track = nowPlaying.track,
@@ -563,6 +614,23 @@ final class AppState: ObservableObject {
                 }
             }
 
+            // If a zone is already selected (e.g., reconnecting after network change),
+            // re-establish event subscription and refresh state. The UPnP device may
+            // have been lost when upnpDevices was cleared during re-discovery.
+            if let zone = activeZone,
+               eventHandler.subscribedDeviceUUID != zone.coordinator.uuid {
+                log.info("Re-establishing connection to \(zone.roomName) after reconnect")
+                await eventHandler.fetchInitialState(
+                    speakerIP: zone.coordinator.ip,
+                    zoneName: zone.roomName
+                )
+                discoveryService.loadUPnPDeviceDirectly(
+                    ip: zone.coordinator.ip,
+                    uuid: zone.coordinator.uuid
+                )
+                refreshVolume()
+            }
+
             // Auto-select zone:
             // 1. Find the zone that is currently PLAYING
             // 2. Fall back to persisted default zone
@@ -677,6 +745,19 @@ final class AppState: ObservableObject {
                     speakerIP: zone.coordinator.ip,
                     zoneName: zone.roomName
                 )
+
+                // If SOAP returned TRANSITIONING, retry after a brief delay
+                // to catch the actual PLAYING state. Without this, position
+                // polling never starts and the watchdog (inside polling) can't
+                // detect stale subscriptions.
+                if eventHandler.nowPlaying.transportState == .transitioning {
+                    try? await Task.sleep(for: .seconds(3))
+                    guard !Task.isCancelled else { return }
+                    await eventHandler.fetchInitialState(
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
+                }
             }
             discoveryService.loadUPnPDeviceDirectly(
                 ip: zone.coordinator.ip,
@@ -755,6 +836,13 @@ final class AppState: ObservableObject {
             } else {
                 await controller.playByIP(ip)
             }
+
+            // When events aren't flowing (no UPnP subscription), the transport
+            // state won't update from the event handler. Refresh via SOAP so the
+            // UI reflects the actual state after the command.
+            if eventHandler.subscribedDeviceUUID == nil {
+                await eventHandler.fetchInitialState(speakerIP: ip, zoneName: nowPlaying.zoneName ?? "")
+            }
         }
     }
 
@@ -772,21 +860,25 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// [Audit fix #3: volume is set optimistically for responsive UI, but reverted if SOAP fails]
+    /// Volume is set optimistically for responsive UI. SOAP calls are
+    /// debounced so rapid slider drags don't flood the speaker.
     func setVolume(_ level: Int) {
         guard let ip = activeCoordinatorIP else { return }
         volume = level
-        // Auto-unmute when the user changes volume while muted
+
+        // Unmute immediately if dragging while muted
         if isMuted && level > 0 {
             isMuted = false
-            Task {
-                await controller.setMuteByIP(ip, muted: false)
-                await controller.setVolumeByIP(ip, level: level)
-            }
-        } else {
-            Task {
-                await controller.setVolumeByIP(ip, level: level)
-            }
+            Task { await controller.setMuteByIP(ip, muted: false) }
+        }
+
+        // Debounce the SOAP volume call — cancel any pending call and
+        // schedule a new one after 50ms. Only the final level gets sent.
+        volumeDebounceTask?.cancel()
+        volumeDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled, let self else { return }
+            await self.controller.setVolumeByIP(ip, level: level)
         }
     }
 
@@ -981,11 +1073,19 @@ final class AppState: ObservableObject {
     private func startPositionPolling() {
         guard positionPollingTask == nil else { return }
         log.debug("Starting position polling")
-        positionPollingTask = Task { @MainActor [weak self] in
+        // Capture the track that's already displayed when polling starts.
+        // For radio/streaming (SOAP duration=0), we use a local elapsed
+        // counter that starts from 0 — suppress until a genuine track
+        // change so the bar doesn't show wrong position on resume.
+        // Standard tracks (SOAP duration>0) always show progress since
+        // SOAP provides accurate real-time position data.
+        let initialTrackId = self.nowPlaying.track?.id
+        positionPollingTask = Task<Void, Never> { @MainActor [weak self] in
             defer { self?.positionPollingTask = nil }
             var seededPosition = false
             var consecutiveFailures = 0
             var hasEverSucceeded = false  // Guard against spurious station break on zone switch
+            var suppressProgress = true   // Radio only: hide until genuine track change
             while !Task.isCancelled {
                 guard let self else { break }
 
@@ -996,6 +1096,12 @@ final class AppState: ObservableObject {
                 // Real songs get the bar back in ~1s when iTunes enrichment
                 // returns duration; DJ/social segments stay at 0.
                 if currentTrackId != self.radioPositionTrackId {
+                    // Genuine new track = different from what was playing when
+                    // polling started. The initial "track change" (polling's
+                    // first loop seeing the existing track) stays suppressed.
+                    if currentTrackId != initialTrackId {
+                        suppressProgress = false
+                    }
                     self.radioPosition = 0
                     self.radioPositionTrackId = currentTrackId
                     self.playbackPosition = 0
@@ -1004,13 +1110,40 @@ final class AppState: ObservableObject {
                     consecutiveFailures = 0
                 }
 
-                // Device may be temporarily nil during SSDP re-discovery — keep retrying
-                if let device = self.activeUPnPDevice,
-                   let info = await self.controller.getPositionInfo(device: device) {
+                // Try UPnP device first, fall back to direct IP-based SOAP
+                // when the UPnP call fails or SSDP hasn't (re)discovered the
+                // speaker. The IP fallback uses manual string-based XML parsing
+                // which is more resilient to malformed responses (e.g. TuneIn
+                // streams with unescaped URL parameters that break NSXMLParser).
+                let info: SonosController.PositionInfo?
+                let deviceAvailable: Bool
+                if let device = self.activeUPnPDevice {
+                    deviceAvailable = true
+                    let upnpResult = await self.controller.getPositionInfo(device: device)
+                    if upnpResult != nil {
+                        info = upnpResult
+                    } else if let ip = self.activeCoordinatorIP {
+                        // UPnP library failed (e.g. XML parse error) — try direct SOAP
+                        info = await self.controller.getPositionInfoByIP(ip)
+                    } else {
+                        info = nil
+                    }
+                } else if let ip = self.activeCoordinatorIP {
+                    deviceAvailable = false
+                    info = await self.controller.getPositionInfoByIP(ip)
+                } else {
+                    deviceAvailable = false
+                    info = nil
+                }
+
+                if let info {
                     consecutiveFailures = 0
                     hasEverSucceeded = true
                     if info.duration > 0 {
-                        // Standard track — SOAP has both position and duration
+                        // Standard track — SOAP has both position and duration.
+                        // Always show progress for standard tracks since SOAP
+                        // provides accurate real-time data (unlike radio where
+                        // we'd rely on a local counter starting from 0).
                         self.playbackPosition = info.position
                         self.playbackDuration = info.duration
 
@@ -1020,11 +1153,13 @@ final class AppState: ObservableObject {
                             seededPosition = true
                             self.scrobbleTracker.seedPosition(info.position)
                         }
-                    } else if trackDuration > 0 {
+                    } else if trackDuration > 0, !suppressProgress {
                         // Radio/streaming — SOAP duration is 0, use local counter.
                         // Duration comes from iTunes enrichment on event-driven track
                         // changes only (initial fetch skips duration since we can't
                         // determine position within a song mid-stream).
+                        // Suppressed on resume because the radio counter would start
+                        // from 0 which is wrong for a song already in progress.
                         self.radioPosition += 1
                         self.playbackPosition = min(self.radioPosition, trackDuration)
                         self.playbackDuration = trackDuration
@@ -1086,8 +1221,12 @@ final class AppState: ObservableObject {
                     // First failure after success on a radio stream = station break
                     // (DJ segment, ad, etc.). GetPositionInfo returns malformed XML
                     // during breaks but succeeds during songs.
+                    // Guard: only trigger when the speaker was actually reachable
+                    // (deviceAvailable or IP fallback tried). If both UPnP device
+                    // and IP are nil, this is a connectivity issue, not a station break.
                     if wasSucceeding,
                        hasEverSucceeded,
+                       deviceAvailable || self.activeCoordinatorIP != nil,
                        let track = self.nowPlaying.track,
                        !track.isDJSegment,
                        self.nowPlaying.mediaTitle != nil {
@@ -1101,17 +1240,6 @@ final class AppState: ObservableObject {
                     } else if consecutiveFailures == 30 {
                         log.warning("Position polling: 30 consecutive failures — still waiting (radio break may be long)")
                     }
-                }
-
-                // Event subscription watchdog: if SOAP calls succeed (speaker
-                // is reachable) but no AVTransport event has arrived in over
-                // 120s (one full UPnP subscription period), the subscription
-                // likely died. Force a re-subscribe to recover.
-                if consecutiveFailures == 0,
-                   let lastEvent = self.eventHandler.lastEventTime,
-                   Date().timeIntervalSince(lastEvent) > 120 {
-                    log.warning("No AVTransport event in >120s — resubscribing")
-                    await self.eventHandler.resubscribe()
                 }
 
                 // Back off on repeated failures to avoid hammering a broken speaker
@@ -1176,14 +1304,16 @@ final class AppState: ObservableObject {
                     ?? self.discoveryService.cachedSpeakerIP
                 if let ip {
                     let groups = await self.zoneManager.getZoneGroups(speakerIP: ip)
-                    if groups != self.zones {
-                        log.info("Zone topology changed externally — updating")
+                    // Compare as sets of zone IDs to ignore ordering differences
+                    // between SOAP responses. SonosZoneGroup.== already handles
+                    // member ordering; this handles zone-level ordering.
+                    let changed = Set(groups.map(\.id)) != Set(self.zones.map(\.id))
+                        || groups.contains(where: { g in
+                            self.zones.first(where: { $0.id == g.id }) != g
+                        })
+                    if changed {
+                        log.info("Zone topology changed externally — updating (\(groups.count) zone(s))")
                         self.zones = groups
-
-                        // If the active zone's coordinator is no longer in the
-                        // topology (e.g., speaker was removed from group and
-                        // became a standalone zone), the UI will reflect this
-                        // automatically via the activeZone computed property.
                     }
                 }
 
@@ -1197,6 +1327,85 @@ final class AppState: ObservableObject {
         log.debug("Stopping zone topology polling")
         zoneTopologyPollingTask?.cancel()
         zoneTopologyPollingTask = nil
+    }
+
+    // MARK: - Event Subscription Watchdog
+
+    /// Standalone watchdog that runs independently of position polling.
+    /// Detects when the UPnP event subscription has died (no events arriving)
+    /// even when playback is STOPPED/TRANSITIONING and position polling isn't active.
+    /// Without this, the app can permanently show stale track data.
+    private func startEventWatchdog() {
+        guard eventWatchdogTask == nil else { return }
+        log.debug("Starting event subscription watchdog")
+        eventWatchdogTask = Task { @MainActor [weak self] in
+            defer { self?.eventWatchdogTask = nil }
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, self.connectionState == .connected else { continue }
+                guard let zone = self.activeZone else { continue }
+
+                // Check if we have no event subscription at all — this happens
+                // when the UPnP device never loaded (SSDP miss + loadDirectly failed)
+                if self.eventHandler.subscribedDeviceUUID == nil {
+                    // Throttle attempts
+                    let now = Date()
+                    if let lastAttempt = self.lastWatchdogResubscribeAttempt,
+                       now.timeIntervalSince(lastAttempt) < 120 {
+                        continue
+                    }
+                    self.lastWatchdogResubscribeAttempt = now
+                    log.warning("Event watchdog: no subscription active — attempting recovery for \(zone.roomName)")
+
+                    // Try UPnP device first, fall back to direct load
+                    if let upnpDevice = self.discoveryService.upnpDevice(for: zone.coordinator.uuid) {
+                        await self.eventHandler.subscribe(
+                            to: upnpDevice,
+                            speakerIP: zone.coordinator.ip,
+                            zoneName: zone.roomName
+                        )
+                    } else {
+                        // Refresh current state via SOAP so the display updates
+                        await self.eventHandler.fetchInitialState(
+                            speakerIP: zone.coordinator.ip,
+                            zoneName: zone.roomName
+                        )
+                        self.discoveryService.loadUPnPDeviceDirectly(
+                            ip: zone.coordinator.ip,
+                            uuid: zone.coordinator.uuid
+                        )
+                    }
+                    continue
+                }
+
+                // Check for stale subscription (subscribed but no events arriving)
+                guard let lastEvent = self.eventHandler.lastEventTime,
+                      Date().timeIntervalSince(lastEvent) > 120 else { continue }
+
+                let now = Date()
+                if let lastAttempt = self.lastWatchdogResubscribeAttempt,
+                   now.timeIntervalSince(lastAttempt) < 120 {
+                    continue
+                }
+                self.lastWatchdogResubscribeAttempt = now
+
+                if self.eventHandler.subscribedDeviceUUID != nil {
+                    log.warning("Event watchdog: no event in >120s — resubscribing to \(zone.roomName)")
+                    await self.eventHandler.resubscribe()
+                } else {
+                    log.warning("Event watchdog: no event in >120s — full re-subscribe to \(zone.roomName)")
+                    self.resubscribeToActiveZone()
+                }
+            }
+        }
+    }
+
+    private func stopEventWatchdog() {
+        guard eventWatchdogTask != nil else { return }
+        log.debug("Stopping event subscription watchdog")
+        eventWatchdogTask?.cancel()
+        eventWatchdogTask = nil
     }
 
     // MARK: - Presets
@@ -1329,6 +1538,14 @@ final class AppState: ObservableObject {
     /// Save the current track to the active music library (Spotify or Apple Music).
     func saveToLibrary() {
         guard let track = nowPlaying.track else { return }
+
+        // No music service connected — warn the user instead of failing silently
+        guard canSaveToLibrary else {
+            log.warning("Save attempted but no music service connected")
+            showSaveWarning("No music service connected — open Setup to connect Apple Music or Spotify")
+            return
+        }
+
         log.info("Saving to library: \(track.artist) – \(track.title)")
 
         savingTrackId = track.id
@@ -1341,6 +1558,7 @@ final class AppState: ObservableObject {
                 result = await appleMusicService.searchAndSave(title: track.title, artist: track.artist)
             } else {
                 self.savingTrackId = nil
+                self.showSaveWarning("Music service disconnected during save")
                 return
             }
 
@@ -1354,8 +1572,23 @@ final class AppState: ObservableObject {
             if result.success {
                 self.savedTrackIds.insert(track.id)
             }
+
         }
     }
+
+    // MARK: - Save Warning
+
+    /// Show a brief warning message near the heart button, auto-clearing after 4 seconds.
+    private func showSaveWarning(_ message: String) {
+        saveWarningMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if self.saveWarningMessage == message {
+                self.saveWarningMessage = nil
+            }
+        }
+    }
+
 }
 
 /// Navigation state for preset editing views.

@@ -27,6 +27,8 @@ actor AlbumArtEnricher {
     /// Returns art URL (600x600) and duration on hit. Results are cached
     /// in memory (including negative results).
     /// Times out after 1.5s so a slow response doesn't delay track updates.
+    /// Tries the raw title first, then a cleaned version with bracketed/parenthetical
+    /// noise stripped (e.g., "[Label 2025]", "(Remix)") to improve hit rates on radio stations.
     func searchArt(artist: String, title: String) async -> EnrichmentResult? {
         let cacheKey = "\(artist)-\(title)"
 
@@ -36,7 +38,38 @@ actor AlbumArtEnricher {
         }
 
         do {
-            let result = try await fetchEnrichment(artist: artist, title: title)
+            // Only accept results that have artwork — a match without art
+            // shouldn't short-circuit the fallback chain.
+            let hasArt: (EnrichmentResult?) -> Bool = { $0?.artURL != nil }
+
+            // First try: raw title
+            var result = try await fetchEnrichment(artist: artist, title: title)
+
+            // Second try: cleaned title (strip bracketed/parenthetical noise)
+            // Radio stations like TuneIn often append label + year in brackets,
+            // e.g., "Wonder [Multi Culti 2026]" which pollutes the search.
+            let cleaned = cleanTitle(title)
+            if !hasArt(result), cleaned != title {
+                log.debug("Retrying iTunes search with cleaned title: \(cleaned)")
+                result = try await fetchEnrichment(artist: artist, title: cleaned) ?? result
+            }
+
+            // Third try: strip "Song - Album" format down to just the song part.
+            // Some radio stations (e.g., openlab on TuneIn) send titles as
+            // "SongTitle - AlbumName [Label Year]". After bracket removal we
+            // may still have "SongTitle - AlbumName" — try just the song part.
+            if !hasArt(result) {
+                let base = cleaned.isEmpty ? title : cleaned
+                let parts = base.split(separator: " - ", maxSplits: 1)
+                if parts.count == 2 {
+                    let songOnly = String(parts[0]).trimmingCharacters(in: .whitespaces)
+                    if !songOnly.isEmpty {
+                        log.debug("Retrying iTunes search with song-only title: \(songOnly)")
+                        result = try await fetchEnrichment(artist: artist, title: songOnly) ?? result
+                    }
+                }
+            }
+
             insertCache(key: cacheKey, value: result)
             if let result {
                 log.debug("iTunes enrichment for \(artist) - \(title): art=\(result.artURL?.absoluteString ?? "nil"), duration=\(result.durationSeconds ?? 0)s")
@@ -54,6 +87,19 @@ actor AlbumArtEnricher {
             }
             return nil
         }
+    }
+
+    /// Strip parenthetical/bracketed noise from titles that hurts search matching.
+    /// Removes things like [Multi Culti 2026], (Remastered 2002), (feat. X), etc.
+    private func cleanTitle(_ title: String) -> String {
+        let cleaned = title.replacingOccurrences(
+            of: #"\s*[\(\[][^\)\]]*[\)\]]"#,
+            with: "",
+            options: .regularExpression
+        )
+        return cleaned.replacingOccurrences(
+            of: #"\s{2,}"#, with: " ", options: .regularExpression
+        ).trimmingCharacters(in: .whitespaces)
     }
 
     /// Clear the cache (useful after sleep/wake when network may have changed).

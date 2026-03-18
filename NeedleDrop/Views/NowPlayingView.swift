@@ -4,9 +4,17 @@ import SwiftUI
 /// transport controls, and volume slider.
 struct NowPlayingView: View {
     @EnvironmentObject var appState: AppState
+    /// Per-speaker volumes for grouped zones, keyed by speaker UUID.
+    @State private var speakerVolumes: [String: Int] = [:]
+    /// Whether per-speaker volume sliders are expanded (grouped zones only).
+    @State private var showSpeakerVolumes = false
 
     private var nowPlaying: NowPlayingState {
         appState.nowPlaying
+    }
+
+    private var isGrouped: Bool {
+        appState.activeZone?.members.isEmpty == false
     }
 
     var body: some View {
@@ -24,6 +32,9 @@ struct NowPlayingView: View {
                 }
                 transportControls
                 volumeSlider
+                if isGrouped && showSpeakerVolumes {
+                    speakerVolumesSection
+                }
             }
         } else {
             emptyView
@@ -186,19 +197,32 @@ struct NowPlayingView: View {
                 .foregroundColor(.red)
                 .help("In your library")
         } else {
-            Button {
-                appState.saveToLibrary()
-            } label: {
-                Image(systemName: isSaving ? "heart.fill" : "heart")
-                    .font(.body)
-                    .foregroundColor(
-                        isSaving ? .red.opacity(0.4) :
-                        canSave ? .secondary : .secondary.opacity(0.3)
-                    )
+            VStack(spacing: 2) {
+                Button {
+                    appState.saveToLibrary()
+                } label: {
+                    Image(systemName: isSaving ? "heart.fill" : "heart")
+                        .font(.body)
+                        .foregroundColor(
+                            isSaving ? .red.opacity(0.4) :
+                            canSave ? .secondary : .secondary.opacity(0.3)
+                        )
+                }
+                .buttonStyle(HoverButtonStyle())
+                .help(canSave ? "Save to library" : "No music service connected")
+                .disabled(isSaving)
+
+                if let warning = appState.saveWarningMessage {
+                    Text(warning)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.red.opacity(0.8))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 120)
+                        .transition(.opacity)
+                        .animation(.easeInOut, value: appState.saveWarningMessage)
+                }
             }
-            .buttonStyle(HoverButtonStyle())
-            .help(canSave ? "Save to library" : "Connect Spotify or Apple Music in Setup to save tracks")
-            .disabled(isSaving || !canSave)
         }
     }
 
@@ -215,6 +239,21 @@ struct NowPlayingView: View {
             Image(systemName: "speaker.wave.3.fill")
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
+            if isGrouped {
+                Button {
+                    showSpeakerVolumes.toggle()
+                    if showSpeakerVolumes { fetchSpeakerVolumes() }
+                } label: {
+                    Image(systemName: showSpeakerVolumes ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(showSpeakerVolumes ? "Hide speaker volumes" : "Show speaker volumes")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -261,6 +300,101 @@ struct NowPlayingView: View {
         .frame(height: 12)
     }
 
+    // MARK: - Group Volume
+
+    /// Expandable per-speaker volume sliders for grouped zones.
+    private var speakerVolumesSection: some View {
+        VStack(spacing: 2) {
+            if let zone = appState.activeZone {
+                let allSpeakers = [zone.coordinator] + zone.members
+
+                ForEach(allSpeakers, id: \.uuid) { speaker in
+                    speakerVolumeRow(for: speaker)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+            }
+        }
+        .onChange(of: appState.selectedZone) { _ in
+            showSpeakerVolumes = false
+        }
+    }
+
+    private func speakerVolumeRow(for speaker: SonosDevice) -> some View {
+        HStack(spacing: 6) {
+            Text(speaker.roomName)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .frame(width: 90, alignment: .trailing)
+                .lineLimit(1)
+
+            speakerSlider(for: speaker)
+
+            Text("\(speakerVolumes[speaker.uuid] ?? 0)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 20, alignment: .trailing)
+        }
+    }
+
+    private func speakerSlider(for speaker: SonosDevice) -> some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let level = speakerVolumes[speaker.uuid] ?? 0
+            let ratio = CGFloat(level) / 100.0
+            let trackHeight: CGFloat = 3
+            let thumbSize: CGFloat = 10
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(height: trackHeight)
+
+                RoundedRectangle(cornerRadius: trackHeight / 2)
+                    .fill(Color.secondary.opacity(0.5))
+                    .frame(width: ratio * width, height: trackHeight)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.2), radius: 0.5, y: 0.5)
+                    .offset(x: ratio * (width - thumbSize))
+            }
+            .frame(height: thumbSize)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let newRatio = max(0, min(value.location.x / width, 1.0))
+                        let newLevel = Int(newRatio * 100)
+                        speakerVolumes[speaker.uuid] = newLevel
+                        appState.setVolumeForSpeaker(speaker.uuid, level: newLevel)
+                    }
+            )
+        }
+        .frame(height: 10)
+    }
+
+    private func fetchSpeakerVolumes() {
+        guard let zone = appState.activeZone, !zone.members.isEmpty else { return }
+        let allSpeakers = [zone.coordinator] + zone.members
+        Task {
+            await withTaskGroup(of: (String, Int?).self) { group in
+                for speaker in allSpeakers {
+                    group.addTask {
+                        let vol = await appState.getVolumeForSpeaker(speaker.uuid)
+                        return (speaker.uuid, vol)
+                    }
+                }
+                for await (uuid, vol) in group {
+                    if let vol {
+                        await MainActor.run { speakerVolumes[uuid] = vol }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Empty State
 
     private var emptyView: some View {
@@ -275,6 +409,10 @@ struct NowPlayingView: View {
                 Text(zone)
                     .font(.caption2)
                     .foregroundColor(.secondary.opacity(0.7))
+            }
+            volumeSlider
+            if isGrouped && showSpeakerVolumes {
+                speakerVolumesSection
             }
         }
         .frame(maxWidth: .infinity, minHeight: 80)

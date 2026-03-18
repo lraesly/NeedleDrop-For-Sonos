@@ -511,13 +511,71 @@ final class SonosController {
     }
 
     /// Parse "H:MM:SS" or "MM:SS" duration string to seconds.
-    private static func parseDuration(_ str: String) -> Int {
+    private nonisolated static func parseDuration(_ str: String) -> Int {
         let parts = str.split(separator: ":").compactMap { Int($0) }
         switch parts.count {
         case 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
         case 2: return parts[0] * 60 + parts[1]
         default: return 0
         }
+    }
+
+    /// Get the current playback position and track duration via direct SOAP call.
+    /// Bypasses UPnP device registry — works even when SSDP hasn't (re)discovered the speaker.
+    nonisolated func getPositionInfoByIP(_ ip: String) async -> PositionInfo? {
+        let url = URL(string: "http://\(ip):1400/MediaRenderer/AVTransport/Control")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 2
+        request.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-Type")
+        request.setValue("\"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo\"", forHTTPHeaderField: "SOAPAction")
+        request.httpBody = Data("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+              <s:Body>
+                <u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                  <InstanceID>0</InstanceID>
+                </u:GetPositionInfo>
+              </s:Body>
+            </s:Envelope>
+            """.utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let body = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+
+            let position = Self.extractDuration(from: body, element: "RelTime")
+            let duration = Self.extractDuration(from: body, element: "TrackDuration")
+
+            // Extract TrackMetaData (DIDL-Lite XML, may be HTML-encoded in SOAP response)
+            var trackMetaData = ""
+            if let startRange = body.range(of: "<TrackMetaData>"),
+               let endRange = body.range(of: "</TrackMetaData>") {
+                let encoded = String(body[startRange.upperBound..<endRange.lowerBound])
+                trackMetaData = encoded
+                    .replacingOccurrences(of: "&lt;", with: "<")
+                    .replacingOccurrences(of: "&gt;", with: ">")
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .replacingOccurrences(of: "&quot;", with: "\"")
+                    .replacingOccurrences(of: "&apos;", with: "'")
+            }
+
+            return PositionInfo(position: position, duration: duration, trackMetaData: trackMetaData)
+        } catch {
+            log.debug("GetPositionInfo SOAP failed for \(ip): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Extract a duration value (H:MM:SS) from a SOAP response element.
+    private nonisolated static func extractDuration(from body: String, element: String) -> Int {
+        let pattern = "(?<=<\(element)>)[^<]+"
+        guard let range = body.range(of: pattern, options: .regularExpression) else { return 0 }
+        return parseDuration(String(body[range]))
     }
 
     // MARK: - Play URI

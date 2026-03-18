@@ -205,7 +205,7 @@ struct MiniPlayerView: View {
                                     )
                             }
                             .buttonStyle(HoverButtonStyle())
-                            .disabled(isSaving || !canSave)
+                            .disabled(isSaving)
                         }
                     }
                 }
@@ -332,7 +332,7 @@ struct MiniPlayerView: View {
                                     )
                             }
                             .buttonStyle(HoverButtonStyle())
-                            .disabled(isSaving || !canSave)
+                            .disabled(isSaving)
                         }
                     }
                 }

@@ -47,5 +47,7 @@
 	</array>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>NeedleDrop uses Apple Music to save tracks you love to your library.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>NeedleDrop uses Apple Events to sync play counts with Music.app when you listen on Sonos.</string>
 </dict>
 </plist>

@@ -28,7 +28,19 @@ final class AppleMusicService: ObservableObject {
     }
 
     init() {
-        authorizationStatus = MusicAuthorization.currentStatus
+        let status = MusicAuthorization.currentStatus
+        authorizationStatus = status
+        let enabled = UserDefaults.standard.bool(forKey: "appleMusicEnabled")
+        log.info("Apple Music init: authorization=\(String(describing: status)), enabled=\(enabled), isConnected=\(status == .authorized && enabled)")
+
+        // If the user previously connected but system authorization was lost
+        // (e.g. reinstall, privacy settings reset), re-request automatically.
+        if enabled && status == .notDetermined {
+            log.info("Apple Music enabled but not authorized — requesting authorization")
+            Task { @MainActor in
+                await self.requestAuthorization()
+            }
+        }
     }
 
     /// Request system authorization for Apple Music access.
@@ -70,19 +82,36 @@ final class AppleMusicService: ObservableObject {
         return aLive != bLive
     }
 
-    /// Search catalog, trying exact title first, then cleaned title on miss.
+    /// Search catalog, trying exact title first, then cleaned title on miss,
+    /// then song-only part (before " - ") for radio stations that send
+    /// "SongTitle - AlbumName [Label Year]".
     private func searchTrack(
         title: String, artist: String
     ) async throws -> Song? {
         // First try: exact title
-        if let song = try await catalogSearch(title: title, artist: artist) {
+        if let song = try await catalogSearch(title: title, artist: artist),
+           song.artwork != nil {
             return song
         }
 
-        // Second try: cleaned title (strip parenthetical noise)
+        // Second try: cleaned title (strip parenthetical/bracketed noise)
         let cleaned = cleanTitle(title)
-        if cleaned != title {
-            return try await catalogSearch(title: cleaned, artist: artist)
+        if cleaned != title,
+           let song = try await catalogSearch(title: cleaned, artist: artist),
+           song.artwork != nil {
+            return song
+        }
+
+        // Third try: strip "Song - Album" format down to just the song part
+        let base = cleaned.isEmpty ? title : cleaned
+        let parts = base.split(separator: " - ", maxSplits: 1)
+        if parts.count == 2 {
+            let songOnly = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            if !songOnly.isEmpty,
+               let song = try await catalogSearch(title: songOnly, artist: artist),
+               song.artwork != nil {
+                return song
+            }
         }
 
         return nil

@@ -27,13 +27,22 @@ final class SonosDiscoveryService: ObservableObject {
     private var pathMonitor: NWPathMonitor?
     private nonisolated(unsafe) var workspaceObservers: [NSObjectProtocol] = []
 
+    /// Set during system sleep to suppress network-change-triggered discovery.
+    /// NWPathMonitor fires multiple rapid path changes as interfaces go down/up
+    /// during sleep — probing cached IPs during sleep always times out.
+    private var isSleeping = false
+
+    /// Debounce task for network-change-triggered discovery. Coalesces rapid
+    /// path changes (common during wake) into a single discovery cycle.
+    private var networkChangeDebounceTask: Task<Void, Never>?
+
     /// The UPnP device type for Sonos ZonePlayers.
     private static let sonosDeviceType = "urn:schemas-upnp-org:device:ZonePlayer:1"
 
     init(speakerStore: SpeakerStore) {
         self.speakerStore = speakerStore
         setupNetworkMonitor()
-        setupWakeObserver()
+        setupSleepWakeObservers()
     }
 
     deinit {
@@ -50,12 +59,23 @@ final class SonosDiscoveryService: ObservableObject {
     func startDiscovery() {
         isDiscovering = true
 
-        // Fast path: probe cached speaker IPs
+        // Fast path: probe cached speaker IPs (filtered to current subnet)
         let cached = speakerStore.loadCachedSpeakers()
-        if !cached.isEmpty {
-            log.info("Probing \(cached.count) cached speaker IPs")
+        let localSubnet = Self.currentSubnetPrefix()
+        let filtered: [CachedSpeaker]
+        if let localSubnet {
+            filtered = cached.filter { $0.ip.hasPrefix(localSubnet) }
+            let skipped = cached.count - filtered.count
+            if skipped > 0 {
+                log.info("Skipping \(skipped) cached speaker(s) on different subnet (current: \(localSubnet)*)")
+            }
+        } else {
+            filtered = cached
+        }
+        if !filtered.isEmpty {
+            log.info("Probing \(filtered.count) cached speaker IPs")
             Task {
-                await probeCachedSpeakers(cached)
+                await probeCachedSpeakers(filtered)
             }
         }
 
@@ -100,14 +120,24 @@ final class SonosDiscoveryService: ObservableObject {
         }
     }
 
+    /// URLSession with a short overall timeout for probing cached speaker IPs.
+    /// The default URLSession.shared uses a 60s resource timeout, which means
+    /// probes to unreachable IPs (e.g., stale IPs from a different subnet)
+    /// block for a long time. This session caps the entire request at 3 seconds.
+    private static let probeSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForResource = 3
+        config.timeoutIntervalForRequest = 3
+        return URLSession(configuration: config)
+    }()
+
     /// Try to reach a Sonos speaker at a known IP by fetching its device description.
     private nonisolated func probeIP(_ ip: String, knownUUID: String?, knownName: String?) async -> SonosDevice? {
         let url = URL(string: "http://\(ip):1400/xml/device_description.xml")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 2
+        let request = URLRequest(url: url)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await Self.probeSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else { return nil }
 
@@ -240,6 +270,35 @@ final class SonosDiscoveryService: ObservableObject {
         speakerStore.cacheSpeaker(device)
     }
 
+    // MARK: - Subnet Helpers
+
+    /// Returns the first three octets of the Mac's current local IP (e.g., "192.168.2.").
+    /// Used to filter cached speaker probes to the current /24 subnet.
+    private nonisolated static func currentSubnetPrefix() -> String? {
+        var addrs: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addrs) == 0, let first = addrs else { return nil }
+        defer { freeifaddrs(addrs) }
+
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let ifa = cursor {
+            defer { cursor = ifa.pointee.ifa_next }
+            guard ifa.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: ifa.pointee.ifa_name)
+            // Skip loopback and non-Wi-Fi/Ethernet interfaces
+            guard name.hasPrefix("en") else { continue }
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(ifa.pointee.ifa_addr, socklen_t(ifa.pointee.ifa_addr.pointee.sa_len),
+                           &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let ip = String(decoding: hostname.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                let parts = ip.split(separator: ".")
+                if parts.count == 4 {
+                    return "\(parts[0]).\(parts[1]).\(parts[2])."
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - Network & Wake Monitoring
 
     private var lastNetworkPath: NWPath?
@@ -256,10 +315,26 @@ final class SonosDiscoveryService: ObservableObject {
                     // Only re-discover if the path actually changed
                     // (e.g., switched Wi-Fi networks, IP changed)
                     if lastPath != path {
-                        log.info("Network change detected — re-discovering speakers")
-                        self.speakers.removeAll()
-                        self.upnpDevices.removeAll()
-                        self.startDiscovery()
+                        // During sleep, network interfaces go down/up causing rapid
+                        // path changes. All probes will timeout — skip entirely.
+                        guard !self.isSleeping else {
+                            log.debug("Network change during sleep — skipping discovery")
+                            self.lastNetworkPath = path
+                            return
+                        }
+
+                        // Debounce: coalesce rapid post-wake path changes into
+                        // a single discovery cycle (NWPathMonitor often fires
+                        // 3-4 times in quick succession after wake).
+                        self.networkChangeDebounceTask?.cancel()
+                        self.networkChangeDebounceTask = Task { @MainActor [weak self] in
+                            try? await Task.sleep(for: .seconds(3))
+                            guard !Task.isCancelled, let self else { return }
+                            log.info("Network change detected — re-discovering speakers")
+                            self.speakers.removeAll()
+                            self.upnpDevices.removeAll()
+                            self.startDiscovery()
+                        }
                     }
                 }
                 self.lastNetworkPath = path
@@ -269,24 +344,43 @@ final class SonosDiscoveryService: ObservableObject {
         pathMonitor = monitor
     }
 
-    private func setupWakeObserver() {
+    private func setupSleepWakeObservers() {
         let center = NSWorkspace.shared.notificationCenter
-        let observer = center.addObserver(
+
+        let sleepObserver = center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in
+                self?.isSleeping = true
+                self?.networkChangeDebounceTask?.cancel()
+                self?.networkChangeDebounceTask = nil
+                log.debug("Discovery suppressed for sleep")
+            }
+        }
+        workspaceObservers.append(sleepObserver)
+
+        let wakeObserver = center.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { _ in
-            // Re-posted to main actor to satisfy strict concurrency.
-            // The notification is observed on .main queue, and the Task
-            // dispatches back to @MainActor for property access.
             Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isSleeping = false
                 log.info("System wake — re-discovering speakers")
-                self?.speakers.removeAll()
-                self?.upnpDevices.removeAll()
-                self?.startDiscovery()
+                // Brief delay to let the network interface stabilize,
+                // then do a single discovery. Any network-change events
+                // that fire during this window are debounced above.
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                self.speakers.removeAll()
+                self.upnpDevices.removeAll()
+                self.startDiscovery()
             }
         }
-        workspaceObservers.append(observer)
+        workspaceObservers.append(wakeObserver)
     }
 }
 
