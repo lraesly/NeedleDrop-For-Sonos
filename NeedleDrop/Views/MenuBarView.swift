@@ -43,6 +43,12 @@ struct MenuBarView: View {
         )) {
             presetPopoverContent
         }
+        .popover(isPresented: Binding(
+            get: { appState.scheduleNav != nil },
+            set: { if !$0 { DispatchQueue.main.async { appState.scheduleNav = nil } } }
+        )) {
+            schedulePopoverContent
+        }
     }
 
     // MARK: - Main Content
@@ -133,6 +139,19 @@ struct MenuBarView: View {
                 .foregroundColor(.secondary)
                 .help(appState.isBannerEnabled ? "Song change popups: On" : "Song change popups: Off")
 
+                // Schedule timer
+                if appState.scrobblerClient.config != nil {
+                    Button {
+                        appState.scheduleNav = .list
+                    } label: {
+                        Image(systemName: "clock")
+                            .font(.caption)
+                    }
+                    .buttonStyle(HoverButtonStyle())
+                    .foregroundColor(.secondary)
+                    .help("Playback Schedules")
+                }
+
                 // Setup toggle (gear icon / "Done" text)
                 Button {
                     showSetup.toggle()
@@ -212,6 +231,28 @@ struct MenuBarView: View {
         appState.homeStore.addHome(householdId: id, name: name)
         newHomeName = ""
         appState.pendingHomeNaming = false
+    }
+
+    // MARK: - Schedule Popover
+
+    @ViewBuilder
+    private var schedulePopoverContent: some View {
+        switch appState.scheduleNav {
+        case .list:
+            ScheduleListView()
+                .environmentObject(appState)
+        case .create:
+            ScheduleEditorView(mode: .create)
+                .environmentObject(appState)
+        case .createFromPreset(let preset):
+            ScheduleEditorView(mode: .createFromPreset(preset))
+                .environmentObject(appState)
+        case .edit(let schedule):
+            ScheduleEditorView(mode: .edit(schedule))
+                .environmentObject(appState)
+        case nil:
+            EmptyView()
+        }
     }
 
     // MARK: - Preset Popover

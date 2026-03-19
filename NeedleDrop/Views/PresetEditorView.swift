@@ -83,9 +83,16 @@ struct PresetEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // Use zone topology (filters invisible/bonded devices) and deduplicate by name
-            let allRooms = Array(Set(appState.allTopologySpeakers.map(\.roomName))).sorted()
-            ScrollView {
+            // Use zone topology (filters invisible/bonded devices) and deduplicate by name.
+            // Merge with already-selected rooms so they always appear even if topology
+            // hasn't loaded yet (e.g. editing a preset before zones are discovered).
+            let topologyRooms = Set(appState.allTopologySpeakers.map(\.roomName))
+            let allRooms = topologyRooms.union(selectedRooms).sorted()
+            if allRooms.isEmpty {
+                Text("No rooms available")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(allRooms, id: \.self) { room in
                         Toggle(room, isOn: Binding(
@@ -108,7 +115,6 @@ struct PresetEditorView: View {
                     }
                 }
             }
-            .frame(maxHeight: 150)
 
             // Primary room picker (when 2+ rooms)
             if selectedRooms.count > 1 {

@@ -157,6 +157,15 @@ struct MiniPlayerView: View {
                 .opacity(appState.playbackDuration > 0 ? 1 : 0)
         }
 
+        // Zone name
+        if let zone = appState.nowPlaying.zoneName {
+            Text(zone)
+                .font(.system(size: 9))
+                .foregroundStyle(tertiaryColor)
+                .shadow(color: shadow, radius: 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
         // Bottom row: transport + heart + volume
         HStack(spacing: 12) {
             if !isTV {
@@ -272,6 +281,14 @@ struct MiniPlayerView: View {
             }
         }
 
+        // Zone name
+        if let zone = appState.nowPlaying.zoneName {
+            Text(zone)
+                .font(.system(size: 10))
+                .foregroundStyle(tertiaryColor)
+                .shadow(color: shadow, radius: 2)
+        }
+
         // Progress bar (large: with timestamps)
         if !isTV {
             PlaybackProgressBar(
@@ -376,6 +393,18 @@ struct MiniPlayerView: View {
                     .font(.caption)
                     .foregroundStyle(tertiaryColor)
                     .shadow(color: shadow, radius: 2)
+
+                if let zone = appState.nowPlaying.zoneName {
+                    Text(zone)
+                        .font(.system(size: 10))
+                        .foregroundStyle(tertiaryColor)
+                        .shadow(color: shadow, radius: 2)
+                }
+
+                if appState.activeZone != nil {
+                    volumeControl()
+                        .padding(.top, 4)
+                }
 
             case .error(let message):
                 Image(systemName: "exclamationmark.triangle")

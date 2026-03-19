@@ -384,12 +384,11 @@ final class SonosEventHandler: ObservableObject {
             }
         }
 
-        // No track metadata — check if this is a radio station break
-        // (transport PLAYING but no song metadata, e.g. TuneIn DJ segment).
-        // Show the station name so the UI isn't blank.
-        if (state == .playing || state == .transitioning),
-           let stationName = mediaTitle ?? currentMediaTitle {
-            log.info("Initial state: station break on \(stationName) (\(state.rawValue))")
+        // No track metadata — check if this is a radio station (playing, paused,
+        // or transitioning but no song metadata). Show the station name so the UI
+        // isn't blank. STOPPED = paused for streaming radio (SiriusXM, TuneIn).
+        if let stationName = mediaTitle ?? currentMediaTitle {
+            log.info("Initial state: station \(stationName) (\(state.rawValue))")
 
             // Seed station state for subsequent events
             if let uri = enqueuedURI {

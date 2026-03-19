@@ -62,6 +62,21 @@ final class AppState: ObservableObject {
         return homeStore.nameForHousehold(id)
     }
 
+    // MARK: - Schedules
+
+    @Published var scheduleNav: ScheduleNav?
+    @Published var schedules: [PlaybackSchedule] = []
+    private(set) lazy var scheduleClient: ScheduleClient = ScheduleClient(scrobblerClient: scrobblerClient)
+
+    func loadSchedules() async {
+        guard scrobblerClient.config != nil else { return }
+        do {
+            schedules = try await scheduleClient.listSchedules()
+        } catch {
+            log.error("Failed to load schedules: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Library
 
     let spotifyService = SpotifyService()
@@ -1597,4 +1612,12 @@ enum PresetNav: Equatable {
     case create
     case edit(Preset)
     case createFromCurrent(rooms: [String], coordinatorRoom: String, sourceUri: String?)
+}
+
+/// Navigation state for schedule editing views.
+enum ScheduleNav: Equatable {
+    case list
+    case create
+    case createFromPreset(Preset)
+    case edit(PlaybackSchedule)
 }

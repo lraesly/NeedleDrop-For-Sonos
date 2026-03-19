@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -23,14 +23,17 @@
 		3A35A714485EE5CD681816FC /* SonosZoneManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4686C2723536A69495CED86 /* SonosZoneManager.swift */; };
 		3FA27FD3A4DABEA360194D83 /* MiniPlayerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9566150C702C09E83917C9 /* MiniPlayerWindow.swift */; };
 		408AF9DA11E24692911F6757 /* HomeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B81F7860A50C483EB584E87 /* HomeStore.swift */; };
+		45F49735C95C478D29E36DBC /* ScheduleClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06164DF60DAF1F2A1405DA6 /* ScheduleClient.swift */; };
 		4B6F178EF4BBB1D447B1814F /* ZonePillButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2B5740EEAB79A3B384BED0 /* ZonePillButton.swift */; };
 		4FF3957F4576EC8459948B6E /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E4F80A67654C669EA5EBA3 /* MiniPlayerView.swift */; };
+		51B32A392FE74B68F2C6878A /* Schedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA507F0C50D7262C9485EC04 /* Schedule.swift */; };
 		57F67A043B869D473C544F2A /* SwiftUPnP in Frameworks */ = {isa = PBXBuildFile; productRef = 0E9AF30BB88D9BCFFFA1CB61 /* SwiftUPnP */; };
 		5D4DAF93666B57D56767BB5C /* SonosEventHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B209AB300C57756C104789 /* SonosEventHandler.swift */; };
 		5D60E7D4096D2FD1E5CDF825 /* ScrobbleFilters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B99725C10D3AB141BBA1011 /* ScrobbleFilters.swift */; };
 		5FFD05F907D74FCD362A10FA /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813AD0FF68EE29F71DD8810D /* NowPlayingView.swift */; };
 		63BA123722FE4F8F75FE36E7 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4F2F14D57DD8F085E6C7C /* MenuBarView.swift */; };
 		65E4A3CC245B5DDA6CCAC1A1 /* Favorites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88F361958578DB4F58A332AD /* Favorites.swift */; };
+		6971AA0D5FA1397E50535C99 /* ScheduleListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3CB8C0F9332B9735A5A58A /* ScheduleListView.swift */; };
 		78157FF006CEC67D55DE9E31 /* ScrobblerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */; };
 		790828A24859206D39C3174B /* SonosController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2974494EA705440203B6F2D1 /* SonosController.swift */; };
 		7990319A0C3E59CD74A3AA90 /* PresetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8589D1B4861B4E4197AB7359 /* PresetEditorView.swift */; };
@@ -40,6 +43,7 @@
 		89EB273022E901D96C581521 /* LibraryServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B572D69E203C6D3A750799D8 /* LibraryServicesView.swift */; };
 		92D967CDA852A4B63EEA9590 /* ScrobblerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33199DA88F53A200D667D909 /* ScrobblerConfig.swift */; };
 		97339D61FCD856521F114064 /* BannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54125E724C8878E6922EFA2 /* BannerView.swift */; };
+		A273C0F88AD5EC3033E0D39C /* ScheduleEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02721D6DD2458F8EA7AFFC22 /* ScheduleEditorView.swift */; };
 		A3916CBE8BCF61DA9EB02024 /* SonosDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F43C02427C88A2826E44CCC /* SonosDevice.swift */; };
 		C1EE98305F9653663B0AF9F4 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA2C4CCF28436F9BF864750 /* AppState.swift */; };
 		C5B200228380F1C9E81F927B /* AppleMusicActionQueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B247C1323D89DA7030146CE7 /* AppleMusicActionQueueRepository.swift */; };
@@ -62,6 +66,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		02721D6DD2458F8EA7AFFC22 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		02ED43C4E7FAE04B18EF7425 /* ScrobblerConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerConfigView.swift; sourceTree = "<group>"; };
 		08A3E78F7AA011B1F268979B /* LastChangeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastChangeParser.swift; sourceTree = "<group>"; };
 		0B81F7860A50C483EB584E87 /* HomeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStore.swift; sourceTree = "<group>"; };
@@ -72,6 +77,7 @@
 		1BB528875D8BA9805328C5FA /* AlbumArtEnricher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtEnricher.swift; sourceTree = "<group>"; };
 		1D9566150C702C09E83917C9 /* MiniPlayerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerWindow.swift; sourceTree = "<group>"; };
 		2974494EA705440203B6F2D1 /* SonosController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosController.swift; sourceTree = "<group>"; };
+		2B3CB8C0F9332B9735A5A58A /* ScheduleListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleListView.swift; sourceTree = "<group>"; };
 		2BB4F2F14D57DD8F085E6C7C /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		33199DA88F53A200D667D909 /* ScrobblerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerConfig.swift; sourceTree = "<group>"; };
 		35E4F80A67654C669EA5EBA3 /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
@@ -94,7 +100,6 @@
 		8B10461A6851FD540D8D465E /* NeedleDrop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NeedleDrop.entitlements; sourceTree = "<group>"; };
 		8ED38A60ACA9C3387F6DAD4C /* Preset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preset.swift; sourceTree = "<group>"; };
 		8EF3A68F138FFDC19D45C408 /* ScrobbleFiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobbleFiltersView.swift; sourceTree = "<group>"; };
-		9B067A1A2F64C19F00D89DBE /* copy_to_applications.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = copy_to_applications.sh; sourceTree = "<group>"; };
 		9EB056E3AC30B6C93CB2C7C0 /* SonosSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosSetupView.swift; sourceTree = "<group>"; };
 		A54125E724C8878E6922EFA2 /* BannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerView.swift; sourceTree = "<group>"; };
 		A7ED3CDE9C927D06D18783FA /* CachedAsyncImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAsyncImage.swift; sourceTree = "<group>"; };
@@ -105,6 +110,7 @@
 		B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerClient.swift; sourceTree = "<group>"; };
 		B572D69E203C6D3A750799D8 /* LibraryServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryServicesView.swift; sourceTree = "<group>"; };
 		B8A66B0457F14459263C314E /* SpeakerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerStore.swift; sourceTree = "<group>"; };
+		BA507F0C50D7262C9485EC04 /* Schedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schedule.swift; sourceTree = "<group>"; };
 		BFBF8817129DF1CEE2F9AFA8 /* AlbumArtWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtWindow.swift; sourceTree = "<group>"; };
 		CAB727278D513446306A7CD7 /* PlaybackProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackProgressBar.swift; sourceTree = "<group>"; };
 		CBB05B85D3DAF3C2E3522E31 /* PlaySessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaySessionManager.swift; sourceTree = "<group>"; };
@@ -114,6 +120,7 @@
 		E1AFDC3FA4B38B861C49C42C /* HoverButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverButtonStyle.swift; sourceTree = "<group>"; };
 		EDA2C4CCF28436F9BF864750 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		EE79D68656F679AD73D777AF /* AppleMusicPlayCountService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicPlayCountService.swift; sourceTree = "<group>"; };
+		F06164DF60DAF1F2A1405DA6 /* ScheduleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleClient.swift; sourceTree = "<group>"; };
 		FDEF96910AE9BB7589E36444 /* BannerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerWindow.swift; sourceTree = "<group>"; };
 		FEAFF3D6F051F80D83426C47 /* OAuthCallbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthCallbackServer.swift; sourceTree = "<group>"; };
 		FEB678BE61E4D956232686CF /* SwiftUPnP */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftUPnP; path = LocalPackages/SwiftUPnP; sourceTree = SOURCE_ROOT; };
@@ -179,6 +186,7 @@
 				806DC32213FDE90D6FCC2029 /* Library.swift */,
 				ACE64121A09DBA9CACA1F40E /* NowPlaying.swift */,
 				8ED38A60ACA9C3387F6DAD4C /* Preset.swift */,
+				BA507F0C50D7262C9485EC04 /* Schedule.swift */,
 				1B99725C10D3AB141BBA1011 /* ScrobbleFilters.swift */,
 				33199DA88F53A200D667D909 /* ScrobblerConfig.swift */,
 				7B70466FE8253BB3443429E0 /* Zone.swift */,
@@ -203,6 +211,8 @@
 				CAB727278D513446306A7CD7 /* PlaybackProgressBar.swift */,
 				8589D1B4861B4E4197AB7359 /* PresetEditorView.swift */,
 				0DB164BED375C9AA33F8229E /* PresetListView.swift */,
+				02721D6DD2458F8EA7AFFC22 /* ScheduleEditorView.swift */,
+				2B3CB8C0F9332B9735A5A58A /* ScheduleListView.swift */,
 				8EF3A68F138FFDC19D45C408 /* ScrobbleFiltersView.swift */,
 				02ED43C4E7FAE04B18EF7425 /* ScrobblerConfigView.swift */,
 				9EB056E3AC30B6C93CB2C7C0 /* SonosSetupView.swift */,
@@ -222,6 +232,7 @@
 				FEAFF3D6F051F80D83426C47 /* OAuthCallbackServer.swift */,
 				CBB05B85D3DAF3C2E3522E31 /* PlaySessionManager.swift */,
 				64FDA6F12A80CA2863A25F18 /* PresetStore.swift */,
+				F06164DF60DAF1F2A1405DA6 /* ScheduleClient.swift */,
 				B5434506780BEA2AC8550DE5 /* ScrobblerClient.swift */,
 				5CC58B577AB4491B89054B6D /* ScrobbleTracker.swift */,
 				B8A66B0457F14459263C314E /* SpeakerStore.swift */,
@@ -236,7 +247,6 @@
 				EADD7E1A38A459AFF0A58BCF /* NeedleDrop */,
 				24A828F9F349DE2A1228EE95 /* Packages */,
 				EAA2FCC5D79FA4E3287640D1 /* Products */,
-				9B067A1A2F64C19F00D89DBE /* copy_to_applications.sh */,
 			);
 			sourceTree = "<group>";
 		};
@@ -283,7 +293,6 @@
 				65A9B0A14785B12688A1FE7E /* Sources */,
 				9D3C04D5B5999F259B058590 /* Resources */,
 				65EE8EDE53003DD2D5F61B43 /* Frameworks */,
-				9B067A1B2F65C17900D89DBE /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -314,7 +323,6 @@
 				};
 			};
 			buildConfigurationList = 24CD348ECBFDD10B556ED3FC /* Build configuration list for PBXProject "NeedleDrop" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -324,9 +332,11 @@
 			mainGroup = A86D4A8E8A2BB43323D19847;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */,
+				E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				1B8D00BA251E6AC39EB35F64 /* XCLocalSwiftPackageReference "LocalPackages/SwiftUPnP" */,
 			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EAA2FCC5D79FA4E3287640D1 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -345,27 +355,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		9B067A1B2F65C17900D89DBE /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "cp -R \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\" /Applications/\n# Type a script or drag a script file from your workspace to insert its path.\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		65A9B0A14785B12688A1FE7E /* Sources */ = {
@@ -404,6 +393,10 @@
 				7990319A0C3E59CD74A3AA90 /* PresetEditorView.swift in Sources */,
 				EF1D2850C25DA0000A288815 /* PresetListView.swift in Sources */,
 				D3B56DFADB6715A1E82F70BB /* PresetStore.swift in Sources */,
+				51B32A392FE74B68F2C6878A /* Schedule.swift in Sources */,
+				45F49735C95C478D29E36DBC /* ScheduleClient.swift in Sources */,
+				A273C0F88AD5EC3033E0D39C /* ScheduleEditorView.swift in Sources */,
+				6971AA0D5FA1397E50535C99 /* ScheduleListView.swift in Sources */,
 				5D60E7D4096D2FD1E5CDF825 /* ScrobbleFilters.swift in Sources */,
 				2B00485A1DD22E7286ECEDC7 /* ScrobbleFiltersView.swift in Sources */,
 				37D08660301F2699672D7391 /* ScrobbleTracker.swift in Sources */,
@@ -621,7 +614,7 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+		E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
 			requirement = {
@@ -638,7 +631,7 @@
 		};
 		2E4C7F0868B96D5F6445DFD3 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */;
+			package = E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
