@@ -49,6 +49,12 @@ struct MenuBarView: View {
         )) {
             schedulePopoverContent
         }
+        .popover(isPresented: Binding(
+            get: { appState.customStationNav != nil },
+            set: { if !$0 { DispatchQueue.main.async { appState.customStationNav = nil } } }
+        )) {
+            customStationPopoverContent
+        }
     }
 
     // MARK: - Main Content
@@ -138,6 +144,17 @@ struct MenuBarView: View {
                 .buttonStyle(HoverButtonStyle())
                 .foregroundColor(.secondary)
                 .help(appState.isBannerEnabled ? "Song change popups: On" : "Song change popups: Off")
+
+                // Custom stations
+                Button {
+                    appState.customStationNav = .list
+                } label: {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.caption)
+                }
+                .buttonStyle(HoverButtonStyle())
+                .foregroundColor(.secondary)
+                .help("Custom Stations")
 
                 // Schedule timer
                 if appState.scrobblerClient.config != nil {
@@ -249,6 +266,25 @@ struct MenuBarView: View {
                 .environmentObject(appState)
         case .edit(let schedule):
             ScheduleEditorView(mode: .edit(schedule))
+                .environmentObject(appState)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Custom Station Popover
+
+    @ViewBuilder
+    private var customStationPopoverContent: some View {
+        switch appState.customStationNav {
+        case .list:
+            CustomStationListView()
+                .environmentObject(appState)
+        case .create:
+            CustomStationEditorView(mode: .create)
+                .environmentObject(appState)
+        case .edit(let station):
+            CustomStationEditorView(mode: .edit(station))
                 .environmentObject(appState)
         case nil:
             EmptyView()

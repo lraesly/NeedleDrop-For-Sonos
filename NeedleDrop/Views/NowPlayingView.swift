@@ -4,8 +4,6 @@ import SwiftUI
 /// transport controls, and volume slider.
 struct NowPlayingView: View {
     @EnvironmentObject var appState: AppState
-    /// Per-speaker volumes for grouped zones, keyed by speaker UUID.
-    @State private var speakerVolumes: [String: Int] = [:]
     /// Whether per-speaker volume sliders are expanded (grouped zones only).
     @State private var showSpeakerVolumes = false
 
@@ -243,7 +241,6 @@ struct NowPlayingView: View {
             if isGrouped {
                 Button {
                     showSpeakerVolumes.toggle()
-                    if showSpeakerVolumes { fetchSpeakerVolumes() }
                 } label: {
                     Image(systemName: showSpeakerVolumes ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -330,7 +327,7 @@ struct NowPlayingView: View {
 
             speakerSlider(for: speaker)
 
-            Text("\(speakerVolumes[speaker.uuid] ?? 0)")
+            Text("\(appState.groupSpeakerVolumes[speaker.uuid] ?? 0)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(width: 20, alignment: .trailing)
@@ -340,7 +337,7 @@ struct NowPlayingView: View {
     private func speakerSlider(for speaker: SonosDevice) -> some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            let level = speakerVolumes[speaker.uuid] ?? 0
+            let level = appState.groupSpeakerVolumes[speaker.uuid] ?? 0
             let ratio = CGFloat(level) / 100.0
             let trackHeight: CGFloat = 3
             let thumbSize: CGFloat = 10
@@ -367,32 +364,12 @@ struct NowPlayingView: View {
                     .onChanged { value in
                         let newRatio = max(0, min(value.location.x / width, 1.0))
                         let newLevel = Int(newRatio * 100)
-                        speakerVolumes[speaker.uuid] = newLevel
+                        appState.groupSpeakerVolumes[speaker.uuid] = newLevel
                         appState.setVolumeForSpeaker(speaker.uuid, level: newLevel)
                     }
             )
         }
         .frame(height: 10)
-    }
-
-    private func fetchSpeakerVolumes() {
-        guard let zone = appState.activeZone, !zone.members.isEmpty else { return }
-        let allSpeakers = [zone.coordinator] + zone.members
-        Task {
-            await withTaskGroup(of: (String, Int?).self) { group in
-                for speaker in allSpeakers {
-                    group.addTask {
-                        let vol = await appState.getVolumeForSpeaker(speaker.uuid)
-                        return (speaker.uuid, vol)
-                    }
-                }
-                for await (uuid, vol) in group {
-                    if let vol {
-                        await MainActor.run { speakerVolumes[uuid] = vol }
-                    }
-                }
-            }
-        }
     }
 
     // MARK: - Empty State

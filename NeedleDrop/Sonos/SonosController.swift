@@ -263,7 +263,7 @@ final class SonosController {
             guard let httpSetResponse = setResponse as? HTTPURLResponse,
                   httpSetResponse.statusCode == 200 else {
                 let body = String(data: data, encoding: .utf8) ?? "no body"
-                log.error("SetAVTransportURI SOAP failed for \(ip): status \((setResponse as? HTTPURLResponse)?.statusCode ?? -1) — \(body.prefix(200))")
+                log.error("SetAVTransportURI SOAP failed for \(ip): status \((setResponse as? HTTPURLResponse)?.statusCode ?? -1) — \(body)")
                 return false
             }
         } catch {
@@ -496,7 +496,7 @@ final class SonosController {
                 trackMetaData: response.trackMetaData
             )
         } catch {
-            log.error("GetPositionInfo failed: \(error.localizedDescription)")
+            log.debug("GetPositionInfo failed: \(error.localizedDescription)")
             return nil
         }
     }

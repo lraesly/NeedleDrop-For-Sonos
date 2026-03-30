@@ -4,6 +4,14 @@ import os
 
 private let log = Logger(subsystem: "com.needledrop", category: "AppleMusic")
 
+/// The title and artist as they appear in the user's Apple Music library.
+/// Used so that downstream AppleScript lookups match the actual library entry
+/// (e.g. "West End Girls (7'' Mix)") rather than the raw stream title ("WEST END GIRLS").
+struct LibraryMatch {
+    let title: String
+    let artist: String
+}
+
 /// Client-side Apple Music integration using MusicKit.
 /// Handles authorization, catalog search, and saving tracks to the user's library.
 /// No server-side keys or tokens needed — MusicKit handles everything locally.
@@ -148,18 +156,20 @@ final class AppleMusicService: ObservableObject {
 
     /// Check if a track is already in the user's Apple Music library.
     ///
-    /// Uses the Apple Music API to search the user's library by artist + title.
-    func isInLibrary(title: String, artist: String) async -> Bool {
+    /// Returns the matched library title and artist if found, so that downstream
+    /// consumers (e.g. play count AppleScript) can look up the track by its
+    /// actual library name rather than the raw stream title.
+    func isInLibrary(title: String, artist: String) async -> LibraryMatch? {
         guard isConnected else {
             log.debug("Library check skipped — not connected")
-            return false
+            return nil
         }
 
         log.info("Library check: \(artist) — \(title)")
 
         // Try with original title first, then cleaned title
-        if await librarySearch(title: title, artist: artist) {
-            return true
+        if let match = await librarySearch(title: title, artist: artist) {
+            return match
         }
 
         let cleaned = cleanTitle(title)
@@ -168,11 +178,11 @@ final class AppleMusicService: ObservableObject {
             return await librarySearch(title: cleaned, artist: artist)
         }
 
-        return false
+        return nil
     }
 
-    /// Single library search attempt — returns true if the track is found.
-    private func librarySearch(title: String, artist: String) async -> Bool {
+    /// Single library search attempt — returns the matched track info if found.
+    private func librarySearch(title: String, artist: String) async -> LibraryMatch? {
         // Use MusicKit's native library search (macOS 14+).
         // The raw /v1/me/library/search endpoint returns empty results
         // when Sync Library is off — MusicLibraryRequest queries the
@@ -188,7 +198,7 @@ final class AppleMusicService: ObservableObject {
     /// Queries the local library database directly — works even without
     /// iCloud Music Library / Sync Library enabled.
     @available(macOS 14.0, *)
-    private func librarySearchNative(title: String, artist: String) async -> Bool {
+    private func librarySearchNative(title: String, artist: String) async -> LibraryMatch? {
         do {
             var request = MusicLibraryRequest<Song>()
             request.filter(matching: \.title, contains: title)
@@ -201,41 +211,37 @@ final class AppleMusicService: ObservableObject {
             }
 
             // Exact match: title + artist both match
-            let exactMatch = response.items.contains { song in
+            if let song = response.items.first(where: { song in
                 song.title.localizedCaseInsensitiveCompare(title) == .orderedSame
                 && song.artistName.localizedCaseInsensitiveCompare(artist) == .orderedSame
-            }
-
-            if exactMatch {
+            }) {
                 log.info("Library check: FOUND (exact match)")
-                return true
+                return LibraryMatch(title: song.title, artist: song.artistName)
             }
 
             // Relaxed match: cleaned titles, overlapping artists, live guard
-            let relaxedMatch = response.items.contains { song in
+            if let song = response.items.first(where: { song in
                 if liveStatusMismatch(song.title, title) { return false }
                 let titleMatch = song.title.localizedCaseInsensitiveCompare(title) == .orderedSame
                     || cleanTitle(song.title).localizedCaseInsensitiveCompare(cleanTitle(title)) == .orderedSame
                 let artistMatch = song.artistName.localizedStandardContains(artist)
                     || artist.localizedStandardContains(song.artistName)
                 return titleMatch && artistMatch
-            }
-
-            if relaxedMatch {
+            }) {
                 log.info("Library check: FOUND (relaxed match)")
-                return true
+                return LibraryMatch(title: song.title, artist: song.artistName)
             }
 
             log.info("Library check: not found for '\(artist) — \(title)'")
-            return false
+            return nil
         } catch {
             log.warning("Library check (native) failed: \(error.localizedDescription)")
-            return false
+            return nil
         }
     }
 
     /// Fallback library search using the raw Apple Music API (macOS 13).
-    private func librarySearchAPI(title: String, artist: String) async -> Bool {
+    private func librarySearchAPI(title: String, artist: String) async -> LibraryMatch? {
         do {
             var components = URLComponents(
                 string: "https://api.music.apple.com/v1/me/library/search"
@@ -248,7 +254,7 @@ final class AppleMusicService: ObservableObject {
 
             guard let url = components.url else {
                 log.error("Library check: failed to build URL")
-                return false
+                return nil
             }
 
             let dataRequest = MusicDataRequest(urlRequest: URLRequest(url: url))
@@ -257,7 +263,7 @@ final class AppleMusicService: ObservableObject {
             let status = response.urlResponse.statusCode
             guard (200..<300).contains(status) else {
                 log.warning("Library check: HTTP \(status)")
-                return false
+                return nil
             }
 
             let json = try JSONSerialization.jsonObject(with: response.data) as? [String: Any]
@@ -267,41 +273,42 @@ final class AppleMusicService: ObservableObject {
 
             log.info("Library search (API) returned \(data.count) results")
 
-            let exactMatch = data.contains { item in
+            func extractAttrs(_ item: [String: Any]) -> (String, String)? {
                 guard let attrs = item["attributes"] as? [String: Any],
                       let songTitle = attrs["name"] as? String,
-                      let songArtist = attrs["artistName"] as? String else { return false }
+                      let songArtist = attrs["artistName"] as? String else { return nil }
+                return (songTitle, songArtist)
+            }
+
+            // Exact match
+            if let item = data.first(where: { item in
+                guard let (songTitle, songArtist) = extractAttrs(item) else { return false }
                 return songTitle.localizedCaseInsensitiveCompare(title) == .orderedSame
                     && songArtist.localizedCaseInsensitiveCompare(artist) == .orderedSame
-            }
-
-            if exactMatch {
+            }), let (songTitle, songArtist) = extractAttrs(item) {
                 log.info("Library check: FOUND (exact match)")
-                return true
+                return LibraryMatch(title: songTitle, artist: songArtist)
             }
 
-            let relaxedMatch = data.contains { item in
-                guard let attrs = item["attributes"] as? [String: Any],
-                      let songTitle = attrs["name"] as? String,
-                      let songArtist = attrs["artistName"] as? String else { return false }
+            // Relaxed match
+            if let item = data.first(where: { item in
+                guard let (songTitle, songArtist) = extractAttrs(item) else { return false }
                 if liveStatusMismatch(songTitle, title) { return false }
                 let titleMatch = songTitle.localizedCaseInsensitiveCompare(title) == .orderedSame
                     || cleanTitle(songTitle).localizedCaseInsensitiveCompare(cleanTitle(title)) == .orderedSame
                 let artistMatch = songArtist.localizedStandardContains(artist)
                     || artist.localizedStandardContains(songArtist)
                 return titleMatch && artistMatch
-            }
-
-            if relaxedMatch {
+            }), let (songTitle, songArtist) = extractAttrs(item) {
                 log.info("Library check: FOUND (relaxed match)")
-                return true
+                return LibraryMatch(title: songTitle, artist: songArtist)
             }
 
             log.info("Library check: not found for '\(artist) — \(title)'")
-            return false
+            return nil
         } catch {
             log.warning("Library check (API) failed: \(error.localizedDescription)")
-            return false
+            return nil
         }
     }
 

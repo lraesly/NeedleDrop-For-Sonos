@@ -34,11 +34,25 @@ final class AppState: ObservableObject {
     @Published var zones: [SonosZoneGroup] = []
     @Published var selectedZone: String?
     @Published var volume: Int = 0
+    /// Per-speaker volumes for the active group, keyed by speaker UUID.
+    /// Used to apply proportional group volume changes and drive per-speaker UI.
+    @Published var groupSpeakerVolumes: [String: Int] = [:]
     /// Whether the active speaker is muted (Sonos hardware mute, independent of volume level).
     @Published var isMuted = false
     @Published var favorites: [FavoriteItem] = []
     /// [Audit fix #6: guard flag to prevent concurrent favorites loading]
     private var isLoadingFavorites = false
+
+    // MARK: - Custom Stations
+
+    let customStationStore = CustomStationStore()
+    @Published var customStationNav: CustomStationNav?
+
+    /// Sonos favorites merged with user-defined custom stations for use in pickers.
+    var allStationChoices: [FavoriteItem] {
+        let custom = customStationStore.stations.map(\.asFavoriteItem)
+        return custom + favorites
+    }
 
     // MARK: - Presets & Home
 
@@ -407,12 +421,20 @@ final class AppState: ObservableObject {
                 refreshVolume()
             }
         } else {
-            // UPnP device lost after sleep — reload directly.
-            // trySubscribeToActiveZone will handle subscription when ready.
-            discoveryService.loadUPnPDeviceDirectly(
-                ip: zone.coordinator.ip,
-                uuid: zone.coordinator.uuid
-            )
+            // UPnP device lost after sleep — reload directly and subscribe.
+            Task {
+                if let device = await discoveryService.loadUPnPDeviceDirectly(
+                    ip: zone.coordinator.ip,
+                    uuid: zone.coordinator.uuid
+                ) {
+                    await eventHandler.subscribe(
+                        to: device,
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
+                    refreshVolume()
+                }
+            }
         }
     }
 
@@ -563,12 +585,15 @@ final class AppState: ObservableObject {
                 }
             } else if appleMusicService.isConnected {
                 Task {
-                    let inLibrary = await appleMusicService.isInLibrary(
+                    let libraryMatch = await appleMusicService.isInLibrary(
                         title: track.title, artist: track.artist
                     )
-                    if inLibrary {
+                    if let libraryMatch {
                         log.info("Track in Apple Music library: \(track.artist) — \(track.title)")
                         self.savedTrackIds.insert(track.id)
+                        self.playSessionManager.setLibraryMatch(
+                            for: track.id, match: libraryMatch
+                        )
                     }
                 }
             }
@@ -639,10 +664,16 @@ final class AppState: ObservableObject {
                     speakerIP: zone.coordinator.ip,
                     zoneName: zone.roomName
                 )
-                discoveryService.loadUPnPDeviceDirectly(
+                if let device = await discoveryService.loadUPnPDeviceDirectly(
                     ip: zone.coordinator.ip,
                     uuid: zone.coordinator.uuid
-                )
+                ) {
+                    await eventHandler.subscribe(
+                        to: device,
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
+                }
                 refreshVolume()
             }
 
@@ -760,6 +791,7 @@ final class AppState: ObservableObject {
                     speakerIP: zone.coordinator.ip,
                     zoneName: zone.roomName
                 )
+                refreshVolume()
 
                 // If SOAP returned TRANSITIONING, retry after a brief delay
                 // to catch the actual PLAYING state. Without this, position
@@ -773,11 +805,19 @@ final class AppState: ObservableObject {
                         zoneName: zone.roomName
                     )
                 }
+
+                // Load UPnP device and subscribe to events
+                if let device = await discoveryService.loadUPnPDeviceDirectly(
+                    ip: zone.coordinator.ip,
+                    uuid: zone.coordinator.uuid
+                ) {
+                    await eventHandler.subscribe(
+                        to: device,
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
+                }
             }
-            discoveryService.loadUPnPDeviceDirectly(
-                ip: zone.coordinator.ip,
-                uuid: zone.coordinator.uuid
-            )
         }
     }
 
@@ -877,8 +917,15 @@ final class AppState: ObservableObject {
 
     /// Volume is set optimistically for responsive UI. SOAP calls are
     /// debounced so rapid slider drags don't flood the speaker.
+    ///
+    /// For grouped zones, the main slider adjusts all speakers proportionally,
+    /// preserving relative volume differences (like the Sonos app). For single
+    /// zones, it controls the one speaker directly.
     func setVolume(_ level: Int) {
-        guard let ip = activeCoordinatorIP else { return }
+        guard let zone = activeZone else { return }
+        let ip = zone.coordinator.ip
+
+        let delta = level - volume
         volume = level
 
         // Unmute immediately if dragging while muted
@@ -887,13 +934,43 @@ final class AppState: ObservableObject {
             Task { await controller.setMuteByIP(ip, muted: false) }
         }
 
+        // For groups: apply delta proportionally to each speaker
+        let isGroup = !zone.members.isEmpty
+        if isGroup && !groupSpeakerVolumes.isEmpty {
+            let allSpeakers = [zone.coordinator] + zone.members
+            for speaker in allSpeakers {
+                let current = groupSpeakerVolumes[speaker.uuid] ?? 0
+                let newLevel = max(0, min(100, current + delta))
+                groupSpeakerVolumes[speaker.uuid] = newLevel
+            }
+        }
+
         // Debounce the SOAP volume call — cancel any pending call and
         // schedule a new one after 50ms. Only the final level gets sent.
         volumeDebounceTask?.cancel()
-        volumeDebounceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled, let self else { return }
-            await self.controller.setVolumeByIP(ip, level: level)
+
+        if isGroup && !groupSpeakerVolumes.isEmpty {
+            // Snapshot the current per-speaker targets for the debounced call
+            let targets = groupSpeakerVolumes
+            volumeDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard !Task.isCancelled, let self else { return }
+                await withTaskGroup(of: Void.self) { group in
+                    for speaker in [zone.coordinator] + zone.members {
+                        if let targetLevel = targets[speaker.uuid] {
+                            group.addTask {
+                                await self.controller.setVolumeByIP(speaker.ip, level: targetLevel)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            volumeDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard !Task.isCancelled, let self else { return }
+                await self.controller.setVolumeByIP(ip, level: level)
+            }
         }
     }
 
@@ -961,11 +1038,17 @@ final class AppState: ObservableObject {
                     speakerIP: coordinatorIP,
                     zoneName: zone.roomName
                 )
-                // Retry UPnP device loading for event subscription
-                discoveryService.loadUPnPDeviceDirectly(
+                // Retry UPnP device loading and subscribe to events
+                if let device = await discoveryService.loadUPnPDeviceDirectly(
                     ip: coordinatorIP,
                     uuid: zone.coordinator.uuid
-                )
+                ) {
+                    await eventHandler.subscribe(
+                        to: device,
+                        speakerIP: coordinatorIP,
+                        zoneName: zone.roomName
+                    )
+                }
             }
         }
     }
@@ -1062,15 +1145,41 @@ final class AppState: ObservableObject {
 
     // MARK: - Volume Polling
 
-    /// Fetch the current volume and mute state from the active zone's coordinator.
+    /// Fetch the current volume and mute state from the active zone.
+    /// For groups, fetches all speaker volumes and uses the average for the main slider.
     func refreshVolume() {
-        guard let ip = activeCoordinatorIP else { return }
+        guard let zone = activeZone else { return }
+        let ip = zone.coordinator.ip
         Task {
-            async let volTask = controller.getVolumeByIP(ip)
             async let muteTask = controller.getMuteByIP(ip)
-            if let vol = await volTask {
-                self.volume = vol
+
+            if zone.members.isEmpty {
+                // Single speaker — just fetch coordinator volume
+                let vol = await controller.getVolumeByIP(ip)
+                if let vol { self.volume = vol }
+                self.groupSpeakerVolumes = [:]
+            } else {
+                // Group — fetch all speaker volumes in parallel
+                let allSpeakers = [zone.coordinator] + zone.members
+                var volumes: [String: Int] = [:]
+                await withTaskGroup(of: (String, Int?).self) { group in
+                    for speaker in allSpeakers {
+                        group.addTask {
+                            let vol = await self.controller.getVolumeByIP(speaker.ip)
+                            return (speaker.uuid, vol)
+                        }
+                    }
+                    for await (uuid, vol) in group {
+                        if let vol { volumes[uuid] = vol }
+                    }
+                }
+                self.groupSpeakerVolumes = volumes
+                // Main slider shows the average of all speakers
+                if !volumes.isEmpty {
+                    self.volume = volumes.values.reduce(0, +) / volumes.count
+                }
             }
+
             if let muted = await muteTask {
                 self.isMuted = muted
             }
@@ -1122,7 +1231,15 @@ final class AppState: ObservableObject {
                     self.playbackPosition = 0
                     self.playbackDuration = 0
                     self.lastPollStreamContent = nil
-                    consecutiveFailures = 0
+                    // Only reset failure counter for real tracks, not DJ segments.
+                    // Station break detection creates a new DJ segment track which
+                    // would reset consecutiveFailures to 0, preventing the polling
+                    // backoff from ever engaging — causing hundreds of rapid
+                    // GetPositionInfo failures per minute during breaks.
+                    let isDJ = self.nowPlaying.track?.isDJSegment ?? false
+                    if !isDJ {
+                        consecutiveFailures = 0
+                    }
                 }
 
                 // Try UPnP device first, fall back to direct IP-based SOAP
@@ -1257,8 +1374,19 @@ final class AppState: ObservableObject {
                     }
                 }
 
-                // Back off on repeated failures to avoid hammering a broken speaker
-                let interval = consecutiveFailures >= 5 ? 10 : 1
+                // Back off on repeated failures to avoid hammering a broken speaker.
+                // During DJ segments (station breaks), poll every 30s since the only
+                // useful signal is metadata reappearing. For normal failures, back off
+                // to 10s after 5 consecutive failures.
+                let isDJSegment = self.nowPlaying.track?.isDJSegment ?? false
+                let interval: Int
+                if isDJSegment {
+                    interval = 30
+                } else if consecutiveFailures >= 5 {
+                    interval = 10
+                } else {
+                    interval = 1
+                }
                 try? await Task.sleep(for: .seconds(interval))
             }
         }
@@ -1364,7 +1492,14 @@ final class AppState: ObservableObject {
                 // Check if we have no event subscription at all — this happens
                 // when the UPnP device never loaded (SSDP miss + loadDirectly failed)
                 if self.eventHandler.subscribedDeviceUUID == nil {
-                    // Throttle attempts
+                    // Always refresh via SOAP every 30s so the display stays current
+                    // even without a working UPnP subscription
+                    await self.eventHandler.fetchInitialState(
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
+
+                    // Throttle UPnP device load / subscribe attempts to every 120s
                     let now = Date()
                     if let lastAttempt = self.lastWatchdogResubscribeAttempt,
                        now.timeIntervalSince(lastAttempt) < 120 {
@@ -1373,30 +1508,31 @@ final class AppState: ObservableObject {
                     self.lastWatchdogResubscribeAttempt = now
                     log.warning("Event watchdog: no subscription active — attempting recovery for \(zone.roomName)")
 
-                    // Try UPnP device first, fall back to direct load
-                    if let upnpDevice = self.discoveryService.upnpDevice(for: zone.coordinator.uuid) {
+                    // Try UPnP device from cache, or load directly and subscribe
+                    var upnpDevice = self.discoveryService.upnpDevice(for: zone.coordinator.uuid)
+                    if upnpDevice == nil {
+                        upnpDevice = await self.discoveryService.loadUPnPDeviceDirectly(
+                            ip: zone.coordinator.ip,
+                            uuid: zone.coordinator.uuid
+                        )
+                    }
+                    if let upnpDevice {
                         await self.eventHandler.subscribe(
                             to: upnpDevice,
                             speakerIP: zone.coordinator.ip,
                             zoneName: zone.roomName
                         )
-                    } else {
-                        // Refresh current state via SOAP so the display updates
-                        await self.eventHandler.fetchInitialState(
-                            speakerIP: zone.coordinator.ip,
-                            zoneName: zone.roomName
-                        )
-                        self.discoveryService.loadUPnPDeviceDirectly(
-                            ip: zone.coordinator.ip,
-                            uuid: zone.coordinator.uuid
-                        )
                     }
                     continue
                 }
 
-                // Check for stale subscription (subscribed but no events arriving)
+                // Check for stale subscription (subscribed but no events arriving).
+                // Use 300s (5 min) threshold to avoid unnecessary resubscribes during
+                // long radio tracks where no metadata changes occur. The subscription
+                // renewals (handled by SwiftUPnP every ~120s) keep the subscription
+                // alive but don't generate events visible to our handler.
                 guard let lastEvent = self.eventHandler.lastEventTime,
-                      Date().timeIntervalSince(lastEvent) > 120 else { continue }
+                      Date().timeIntervalSince(lastEvent) > 300 else { continue }
 
                 let now = Date()
                 if let lastAttempt = self.lastWatchdogResubscribeAttempt,
@@ -1406,10 +1542,10 @@ final class AppState: ObservableObject {
                 self.lastWatchdogResubscribeAttempt = now
 
                 if self.eventHandler.subscribedDeviceUUID != nil {
-                    log.warning("Event watchdog: no event in >120s — resubscribing to \(zone.roomName)")
+                    log.warning("Event watchdog: no event in >300s — resubscribing to \(zone.roomName)")
                     await self.eventHandler.resubscribe()
                 } else {
-                    log.warning("Event watchdog: no event in >120s — full re-subscribe to \(zone.roomName)")
+                    log.warning("Event watchdog: no event in >300s — full re-subscribe to \(zone.roomName)")
                     self.resubscribeToActiveZone()
                 }
             }
@@ -1620,4 +1756,11 @@ enum ScheduleNav: Equatable {
     case create
     case createFromPreset(Preset)
     case edit(PlaybackSchedule)
+}
+
+/// Navigation state for custom station editing views.
+enum CustomStationNav: Equatable {
+    case list
+    case create
+    case edit(CustomStation)
 }

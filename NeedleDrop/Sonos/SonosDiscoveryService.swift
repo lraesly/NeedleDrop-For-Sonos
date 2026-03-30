@@ -225,15 +225,16 @@ final class SonosDiscoveryService: ObservableObject {
 
     /// Load a UPnP device directly from a speaker IP, bypassing SSDP.
     ///
-    /// Creates a `UPnPDevice` from the device description URL and feeds it to
-    /// the shared registry, which loads root XML, creates typed services (AVTransport,
-    /// RenderingControl, etc.), and fires `deviceAddedSubject`. Our existing
-    /// `handleDiscoveredUPnPDevice` then picks it up and triggers event subscription.
+    /// Uses `reanimateDeep` to fully load the device (root XML + services) in one
+    /// awaitable call, then stores it directly. The previous approach used
+    /// `UPnPRegistry.shared.add()` which fires an internal async Task that could
+    /// silently fail at multiple steps (root XML load, service creation, publisher
+    /// delivery), leaving `upnpDevices[uuid]` permanently nil.
     ///
     /// This is the fallback when SSDP multicast discovery doesn't find the speaker
     /// (common on some Sonos devices / network configurations).
-    func loadUPnPDeviceDirectly(ip: String, uuid: String) {
-        guard upnpDevices[uuid] == nil else { return }
+    func loadUPnPDeviceDirectly(ip: String, uuid: String) async -> UPnPDevice? {
+        guard upnpDevices[uuid] == nil else { return upnpDevices[uuid] }
 
         log.info("Loading UPnP device directly for \(uuid) at \(ip)")
 
@@ -246,15 +247,20 @@ final class SonosDiscoveryService: ObservableObject {
             lastSeen: Date()
         )
 
-        guard let data = try? JSONEncoder().encode(description),
-              let device = UPnPDevice.reanimate(from: data) else {
-            log.error("Failed to create UPnP device description for \(uuid)")
-            return
+        // reanimateDeep loads root XML + creates typed services (AVTransport, etc.)
+        // in a single awaitable call. Pass the shared registry so services get the
+        // event callback URL for UPnP SUBSCRIBE.
+        guard let device = await UPnPDevice.reanimateDeep(
+            upnpDeviceDescription: description,
+            registry: UPnPRegistry.shared
+        ) else {
+            log.error("Failed to load UPnP device for \(uuid) at \(ip)")
+            return nil
         }
 
-        // Registry.add() is async internally: loads root XML → creates services →
-        // fires deviceAddedSubject → our handleDiscoveredUPnPDevice picks it up.
-        UPnPRegistry.shared.add(device)
+        upnpDevices[uuid] = device
+        log.info("Loaded UPnP device directly: \(uuid) at \(ip) (\(device.services.count) services)")
+        return device
     }
 
     // MARK: - Speaker Management

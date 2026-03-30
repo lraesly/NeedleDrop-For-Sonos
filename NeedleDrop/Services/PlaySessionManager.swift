@@ -22,11 +22,23 @@ final class PlaySessionManager {
     private var activeRawDurationMs: Int?
     private var activeSourceService: String?
     private var activeTrackInLibrary: Bool = false
+    private var activeLibraryMatch: LibraryMatch?
     private var lastPlayingTime: Date?
     private var accumulatedMs: Int = 0
 
     init(dbPool: DatabasePool) {
         self.queueRepo = AppleMusicActionQueueRepository(dbPool: dbPool)
+    }
+
+    // MARK: - Library Match
+
+    /// Store the library match info for a track (called when the async library
+    /// check completes, which may be after the session was opened).
+    func setLibraryMatch(for trackId: String, match: LibraryMatch) {
+        if trackId == activeTrackId {
+            activeTrackInLibrary = true
+            activeLibraryMatch = match
+        }
     }
 
     // MARK: - State Change Handler
@@ -107,10 +119,16 @@ final class PlaySessionManager {
 
         // Enqueue Apple Music play count increment if qualified AND track is in library.
         // Skip when source is Apple Music — Music.app already increments its own play count.
+        // Use the library match title/artist (the actual name in Apple Music) so that the
+        // AppleScript lookup finds the track even when the stream title differs
+        // (e.g. "WEST END GIRLS" vs "West End Girls (7'' Mix)").
         let isAppleMusicSource = activeSourceService == "apple_music"
-        if qualified, activeTrackInLibrary, !isAppleMusicSource,
-           let title = activeRawTitle, let artist = activeRawArtist {
-            enqueuePlayCountIfNeeded(title: title, artist: artist)
+        if qualified, activeTrackInLibrary, !isAppleMusicSource {
+            let title = activeLibraryMatch?.title ?? activeRawTitle
+            let artist = activeLibraryMatch?.artist ?? activeRawArtist
+            if let title, let artist {
+                enqueuePlayCountIfNeeded(title: title, artist: artist)
+            }
         }
 
         activeTrackId = nil
@@ -119,6 +137,7 @@ final class PlaySessionManager {
         activeRawDurationMs = nil
         activeSourceService = nil
         activeTrackInLibrary = false
+        activeLibraryMatch = nil
         accumulatedMs = 0
         lastPlayingTime = nil
     }

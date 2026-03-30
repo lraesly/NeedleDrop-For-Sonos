@@ -72,8 +72,17 @@ struct PresetEditorView: View {
 
             Picker("Station", selection: $selectedFavorite) {
                 Text("Select a station...").tag(nil as FavoriteItem?)
-                ForEach(appState.favorites) { fav in
-                    Text(fav.title).tag(fav as FavoriteItem?)
+                if !appState.customStationStore.stations.isEmpty {
+                    Section("Custom Stations") {
+                        ForEach(appState.customStationStore.stations) { station in
+                            Text(station.name).tag(station.asFavoriteItem as FavoriteItem?)
+                        }
+                    }
+                }
+                Section("Sonos Favorites") {
+                    ForEach(appState.favorites) { fav in
+                        Text(fav.title).tag(fav as FavoriteItem?)
+                    }
                 }
             }
             .labelsHidden()
@@ -202,6 +211,7 @@ struct PresetEditorView: View {
     private func matchFavorite() {
         if case .edit(let preset) = mode {
             selectedFavorite = appState.favorites.first(where: { $0.uri == preset.favorite.uri })
+                ?? appState.customStationStore.stations.first(where: { $0.streamURL == preset.favorite.uri })?.asFavoriteItem
         } else if !prefillRooms.isEmpty {
             // "Save What's Playing" — always use current volume
             volumeLevel = Double(appState.volume)

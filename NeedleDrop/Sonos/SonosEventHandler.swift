@@ -497,12 +497,16 @@ final class SonosEventHandler: ObservableObject {
 
     /// Process a single AVTransport state change event.
     private func handleEvent(_ state: AVTransport1Service.State) async {
+        // Update timestamp for ANY event delivery — proves the subscription is alive.
+        // Must happen before the guard so "empty" events (no lastChange) still reset
+        // the watchdog timer. Without this, quiet radio streams (same track for >120s)
+        // trigger unnecessary resubscribes.
+        lastEventTime = Date()
+
         guard let lastChange = state.lastChange,
               let speakerIP = subscribedSpeakerIP else {
             return
         }
-
-        lastEventTime = Date()
 
         // 1. Parse the LastChange XML
         guard let event = LastChangeParser.parse(lastChange) else {

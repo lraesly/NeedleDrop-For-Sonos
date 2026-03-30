@@ -59,7 +59,7 @@ final class AlbumArtWindow {
 
         let p = ClickDismissPanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .closable, .nonactivatingPanel],
+            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -71,6 +71,9 @@ final class AlbumArtWindow {
         p.backgroundColor = .black
         p.hasShadow = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Set min size so the window can't be shrunk to nothing
+        p.minSize = NSSize(width: 200, height: 200)
 
         // Hide miniaturize and zoom buttons
         p.standardWindowButton(.miniaturizeButton)?.isHidden = true
