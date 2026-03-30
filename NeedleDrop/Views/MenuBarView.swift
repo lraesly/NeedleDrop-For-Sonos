@@ -91,6 +91,7 @@ struct MenuBarView: View {
                     EmptyView()
                 }
             }
+            .frame(minHeight: 300)
         }
     }
 

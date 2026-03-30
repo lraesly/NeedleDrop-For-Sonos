@@ -157,14 +157,29 @@ struct MiniPlayerView: View {
                 .opacity(appState.playbackDuration > 0 ? 1 : 0)
         }
 
-        // Zone name
-        if let zone = appState.nowPlaying.zoneName {
-            Text(zone)
-                .font(.system(size: 9))
-                .foregroundStyle(tertiaryColor)
-                .shadow(color: shadow, radius: 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        // Zone name + station
+        HStack(spacing: 4) {
+            if let zone = appState.nowPlaying.zoneName {
+                Text(zone)
+                    .font(.system(size: 9))
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+            }
+            if let station = appState.nowPlaying.mediaTitle {
+                if appState.nowPlaying.zoneName != nil {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(tertiaryColor)
+                        .shadow(color: shadow, radius: 2)
+                }
+                Text(station)
+                    .font(.system(size: 9))
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+            }
         }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
 
         // Bottom row: transport + heart + volume
         HStack(spacing: 12) {
@@ -281,13 +296,28 @@ struct MiniPlayerView: View {
             }
         }
 
-        // Zone name
-        if let zone = appState.nowPlaying.zoneName {
-            Text(zone)
-                .font(.system(size: 10))
-                .foregroundStyle(tertiaryColor)
-                .shadow(color: shadow, radius: 2)
+        // Zone name + station
+        HStack(spacing: 4) {
+            if let zone = appState.nowPlaying.zoneName {
+                Text(zone)
+                    .font(.system(size: 10))
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+            }
+            if let station = appState.nowPlaying.mediaTitle {
+                if appState.nowPlaying.zoneName != nil {
+                    Text("·")
+                        .font(.system(size: 10))
+                        .foregroundStyle(tertiaryColor)
+                        .shadow(color: shadow, radius: 2)
+                }
+                Text(station)
+                    .font(.system(size: 10))
+                    .foregroundStyle(tertiaryColor)
+                    .shadow(color: shadow, radius: 2)
+            }
         }
+        .lineLimit(1)
 
         // Progress bar (large: with timestamps)
         if !isTV {

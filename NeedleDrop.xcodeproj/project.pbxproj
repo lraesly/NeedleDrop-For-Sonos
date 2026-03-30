@@ -73,10 +73,6 @@
 		02721D6DD2458F8EA7AFFC22 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		02ED43C4E7FAE04B18EF7425 /* ScrobblerConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobblerConfigView.swift; sourceTree = "<group>"; };
 		08A3E78F7AA011B1F268979B /* LastChangeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastChangeParser.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B5C /* CustomStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStation.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B5D /* CustomStationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationStore.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B5E /* CustomStationEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationEditorView.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B5F /* CustomStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationListView.swift; sourceTree = "<group>"; };
 		0B81F7860A50C483EB584E87 /* HomeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStore.swift; sourceTree = "<group>"; };
 		0DB164BED375C9AA33F8229E /* PresetListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetListView.swift; sourceTree = "<group>"; };
 		1443E76259D1E7FBCEE18293 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -109,6 +105,10 @@
 		8ED38A60ACA9C3387F6DAD4C /* Preset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preset.swift; sourceTree = "<group>"; };
 		8EF3A68F138FFDC19D45C408 /* ScrobbleFiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrobbleFiltersView.swift; sourceTree = "<group>"; };
 		9EB056E3AC30B6C93CB2C7C0 /* SonosSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonosSetupView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* CustomStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStation.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5D /* CustomStationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationStore.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5E /* CustomStationEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationEditorView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5F /* CustomStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStationListView.swift; sourceTree = "<group>"; };
 		A54125E724C8878E6922EFA2 /* BannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerView.swift; sourceTree = "<group>"; };
 		A7ED3CDE9C927D06D18783FA /* CachedAsyncImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAsyncImage.swift; sourceTree = "<group>"; };
 		ACE64121A09DBA9CACA1F40E /* NowPlaying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlaying.swift; sourceTree = "<group>"; };
@@ -305,6 +305,7 @@
 				65A9B0A14785B12688A1FE7E /* Sources */,
 				9D3C04D5B5999F259B058590 /* Resources */,
 				65EE8EDE53003DD2D5F61B43 /* Frameworks */,
+				9B97BC622F7B329500953EE4 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -344,7 +345,7 @@
 			mainGroup = A86D4A8E8A2BB43323D19847;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */,
 				1B8D00BA251E6AC39EB35F64 /* XCLocalSwiftPackageReference "LocalPackages/SwiftUPnP" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -367,6 +368,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9B97BC622F7B329500953EE4 /* Install to Applications */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Install to Applications";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -d \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/PlugIns\" ]; then\n  echo \"Skipping install — test bundle embedded\"\n  exit 0\nfi\n\n# Kill running instance so the bundle isn't locked\nkillall \"${PRODUCT_NAME}\" 2>/dev/null || true\nsleep 0.5\n\nrm -rf \"/Applications/${PRODUCT_NAME}.app\"\nditto \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\" \"/Applications/${PRODUCT_NAME}.app\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		65A9B0A14785B12688A1FE7E /* Sources */ = {
@@ -630,7 +652,7 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+		E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
 			requirement = {
@@ -647,7 +669,7 @@
 		};
 		2E4C7F0868B96D5F6445DFD3 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			package = E4CA4F2164E9A8E4A7170AD3 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */

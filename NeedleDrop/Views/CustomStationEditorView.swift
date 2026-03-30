@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.needledrop", category: "CustomStationEditor")
 
 struct CustomStationEditorView: View {
     enum Mode: Equatable {
@@ -13,6 +16,8 @@ struct CustomStationEditorView: View {
     @State private var name: String
     @State private var streamURL: String
     @State private var artURL: String
+    @State private var isLooking = false
+    @State private var lookupFailed = false
 
     init(mode: Mode) {
         self.mode = mode
@@ -33,8 +38,31 @@ struct CustomStationEditorView: View {
             Text(isEditing ? "Edit Station" : "New Station")
                 .font(.headline)
 
-            TextField("Station Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Station Name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+
+                Button {
+                    lookupStation()
+                } label: {
+                    if isLooking {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isLooking)
+                .help("Look up on TuneIn")
+            }
+
+            if lookupFailed {
+                Text("No match found on TuneIn")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             TextField("Stream URL", text: $streamURL)
                 .textFieldStyle(.roundedBorder)
@@ -73,7 +101,7 @@ struct CustomStationEditorView: View {
             }
         }
         .padding(16)
-        .frame(width: 280)
+        .frame(width: 300)
     }
 
     // MARK: - Helpers
@@ -104,6 +132,82 @@ struct CustomStationEditorView: View {
         } else {
             let station = CustomStation(name: trimmedName, streamURL: trimmedURL, artURL: art)
             appState.customStationStore.add(station)
+        }
+    }
+
+    // MARK: - TuneIn Lookup
+
+    private func lookupStation() {
+        let query = name.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+
+        isLooking = true
+        lookupFailed = false
+
+        Task {
+            defer { isLooking = false }
+
+            guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                  let url = URL(string: "https://opml.radiotime.com/Search.ashx?query=\(encoded)&render=json") else {
+                lookupFailed = true
+                return
+            }
+
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let body = json["body"] as? [[String: Any]] else {
+                    log.info("TuneIn lookup: unexpected response format")
+                    lookupFailed = true
+                    return
+                }
+
+                // Find the first station result
+                guard let station = body.first(where: { $0["item"] as? String == "station" }) else {
+                    log.info("TuneIn lookup: no station found for '\(query)'")
+                    lookupFailed = true
+                    return
+                }
+
+                let stationName = station["text"] as? String ?? "?"
+                let guideId = station["guide_id"] as? String
+                let image = station["image"] as? String
+                log.info("TuneIn lookup: found '\(stationName)' (id: \(guideId ?? "?"))")
+
+                // Auto-fill art URL if empty
+                if artURL.trimmingCharacters(in: .whitespaces).isEmpty, let image {
+                    // Use larger logo variant (logod vs logoq)
+                    artURL = image.replacingOccurrences(of: "q.png", with: "d.png")
+                }
+
+                // Auto-fill stream URL if empty
+                if streamURL.trimmingCharacters(in: .whitespaces).isEmpty, let guideId {
+                    if let streamResult = await fetchTuneInStream(id: guideId) {
+                        streamURL = streamResult
+                    }
+                }
+            } catch {
+                log.error("TuneIn lookup failed: \(error)")
+                lookupFailed = true
+            }
+        }
+    }
+
+    private func fetchTuneInStream(id: String) async -> String? {
+        guard let url = URL(string: "https://opml.radiotime.com/Tune.ashx?id=\(id)&render=json") else {
+            return nil
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let body = json["body"] as? [[String: Any]],
+                  let streamURL = body.first?["url"] as? String else {
+                return nil
+            }
+            return streamURL
+        } catch {
+            log.error("TuneIn stream fetch failed: \(error.localizedDescription)")
+            return nil
         }
     }
 }

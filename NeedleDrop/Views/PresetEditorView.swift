@@ -227,9 +227,20 @@ struct PresetEditorView: View {
             log.info("Matching favorite — URIs to try: \(urisToTry)")
             log.info("Available favorites: \(appState.favorites.map { "\($0.title): \($0.uri.prefix(60))" })")
 
+            // Try to match the playing source to a custom station first (by URI),
+            // then fall back to Sonos favorites.
+            let customFavorites = appState.customStationStore.stations.map(\.asFavoriteItem)
+
             // Try to match the playing source to a favorite by URI
             for uri in urisToTry {
                 guard selectedFavorite == nil else { break }
+
+                // Check custom stations first
+                selectedFavorite = customFavorites.first(where: { $0.uri == uri })
+                    ?? customFavorites.first(where: { uriBase($0.uri) == uriBase(uri) })
+                if selectedFavorite != nil { log.info("Matched custom station by URI"); break }
+
+                // Then Sonos favorites
                 // 1. Exact URI match
                 selectedFavorite = appState.favorites.first(where: { $0.uri == uri })
                 if selectedFavorite != nil { log.info("Matched by exact URI"); break }
@@ -244,12 +255,21 @@ struct PresetEditorView: View {
                 if selectedFavorite != nil { log.info("Matched by partial URI"); break }
             }
 
-            // 4. Title-based fallback — match media/station title against favorite titles
+            // 4. Title-based fallback — match media/station title against custom stations then favorites
             if selectedFavorite == nil, let mediaTitle = appState.nowPlaying.mediaTitle {
                 log.info("URI matching failed, trying title match: '\(mediaTitle)'")
-                selectedFavorite = appState.favorites.first(where: {
+                // Check custom stations by name
+                selectedFavorite = customFavorites.first(where: {
                     $0.title.localizedCaseInsensitiveCompare(mediaTitle) == .orderedSame
                 })
+                if selectedFavorite != nil { log.info("Matched custom station by title"); }
+
+                // Then Sonos favorites
+                if selectedFavorite == nil {
+                    selectedFavorite = appState.favorites.first(where: {
+                        $0.title.localizedCaseInsensitiveCompare(mediaTitle) == .orderedSame
+                    })
+                }
                 // Also try contains (e.g., "Underground Garage" matches "SXM Underground Garage")
                 if selectedFavorite == nil {
                     selectedFavorite = appState.favorites.first(where: {

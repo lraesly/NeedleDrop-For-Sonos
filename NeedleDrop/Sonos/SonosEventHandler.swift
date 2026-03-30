@@ -566,6 +566,13 @@ final class SonosEventHandler: ObservableObject {
             log.debug("Enqueued URI from event: \(enqueued)")
         }
 
+        // 2d. Restore media title if it was lost (events don't always include
+        //     enqueuedTransportURIMetaData, especially for custom streams).
+        if nowPlaying.mediaTitle == nil, let persisted = currentMediaTitle {
+            nowPlaying.mediaTitle = persisted
+            log.debug("Restored mediaTitle from persisted: \(persisted)")
+        }
+
         // 3. Check for TV audio
         if let uri = transportURI, uri.hasPrefix(tvAudioURIPrefix) {
             // Use actual transport state from event, fall back to current state
