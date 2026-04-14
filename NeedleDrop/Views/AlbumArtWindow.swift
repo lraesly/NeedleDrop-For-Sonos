@@ -136,5 +136,12 @@ private struct AlbumArtContentView: View {
             .onTapGesture {
                 NSApp.keyWindow?.close()
             }
+            .contextMenu {
+                Button("Copy Image") {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([image])
+                }
+            }
     }
 }
