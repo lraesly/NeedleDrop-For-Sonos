@@ -880,24 +880,33 @@ final class AppState: ObservableObject {
     func togglePlayPause() {
         guard let ip = activeCoordinatorIP else { return }
         let isTV = nowPlaying.track?.isTVAudio == true
+        let wasPlaying = nowPlaying.transportState == .playing
+
+        // Optimistically flip the UI state so the button responds immediately.
+        // The authoritative state will arrive via AVTransport events (or the
+        // SOAP reconcile below) and will correct this if the command failed.
+        if !isTV {
+            nowPlaying.transportState = wasPlaying ? .paused : .playing
+            eventHandler.nowPlaying.transportState = nowPlaying.transportState
+        }
+
         Task {
             if isTV {
                 // TV audio is a live HDMI stream — Pause/Stop are ignored by Sonos.
                 // Use mute/unmute instead and toggle the icon locally.
                 isTVMuted.toggle()
                 await controller.setMuteByIP(ip, muted: isTVMuted)
-            } else if nowPlaying.transportState == .playing {
+            } else if wasPlaying {
                 await controller.pauseByIP(ip)
             } else {
                 await controller.playByIP(ip)
             }
 
-            // When events aren't flowing (no UPnP subscription), the transport
-            // state won't update from the event handler. Refresh via SOAP so the
-            // UI reflects the actual state after the command.
-            if eventHandler.subscribedDeviceUUID == nil {
-                await eventHandler.fetchInitialState(speakerIP: ip, zoneName: nowPlaying.zoneName ?? "")
-            }
+            // Always reconcile via SOAP after a short delay. Events may not
+            // fire reliably for every stream/subscription, so the explicit
+            // fetch guarantees the UI matches the speaker's actual state.
+            try? await Task.sleep(for: .milliseconds(400))
+            await eventHandler.fetchInitialState(speakerIP: ip, zoneName: nowPlaying.zoneName ?? "")
         }
     }
 
