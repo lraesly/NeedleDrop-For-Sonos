@@ -10,6 +10,8 @@ private let log = Logger(subsystem: "com.needledrop", category: "AppleMusic")
 struct LibraryMatch {
     let title: String
     let artist: String
+    /// True if the user has loved (rating value 1) this library track.
+    let isLoved: Bool
 }
 
 /// Client-side Apple Music integration using MusicKit.
@@ -194,6 +196,34 @@ final class AppleMusicService: ObservableObject {
         }
     }
 
+    /// Fetch the user's rating for a library song (1 = loved, -1 = disliked,
+    /// nil/missing = no rating). Returns nil on error or 404. Costs ~one
+    /// HTTPS round-trip per call.
+    private func fetchLibraryRating(libraryId: String) async -> Int? {
+        guard let url = URL(
+            string: "https://api.music.apple.com/v1/me/ratings/library-songs/\(libraryId)"
+        ) else { return nil }
+
+        do {
+            let request = MusicDataRequest(urlRequest: URLRequest(url: url))
+            let response = try await request.response()
+            let status = response.urlResponse.statusCode
+            // 404 means no rating set — that's "not loved", not an error.
+            if status == 404 { return 0 }
+            guard (200..<300).contains(status) else {
+                log.debug("Rating fetch HTTP \(status) for \(libraryId)")
+                return nil
+            }
+            let json = try JSONSerialization.jsonObject(with: response.data) as? [String: Any]
+            let data = (json?["data"] as? [[String: Any]])?.first
+            let attrs = data?["attributes"] as? [String: Any]
+            return attrs?["value"] as? Int
+        } catch {
+            log.debug("Rating fetch failed for \(libraryId): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Native MusicKit library search (macOS 14+).
     /// Queries the local library database directly — works even without
     /// iCloud Music Library / Sync Library enabled.
@@ -215,8 +245,9 @@ final class AppleMusicService: ObservableObject {
                 song.title.localizedCaseInsensitiveCompare(title) == .orderedSame
                 && song.artistName.localizedCaseInsensitiveCompare(artist) == .orderedSame
             }) {
-                log.info("Library check: FOUND (exact match)")
-                return LibraryMatch(title: song.title, artist: song.artistName)
+                let isLoved = await fetchLibraryRating(libraryId: song.id.rawValue) == 1
+                log.info("Library check: FOUND (exact match), loved=\(isLoved)")
+                return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
             }
 
             // Relaxed match: cleaned titles, overlapping artists, live guard
@@ -228,8 +259,9 @@ final class AppleMusicService: ObservableObject {
                     || artist.localizedStandardContains(song.artistName)
                 return titleMatch && artistMatch
             }) {
-                log.info("Library check: FOUND (relaxed match)")
-                return LibraryMatch(title: song.title, artist: song.artistName)
+                let isLoved = await fetchLibraryRating(libraryId: song.id.rawValue) == 1
+                log.info("Library check: FOUND (relaxed match), loved=\(isLoved)")
+                return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
             }
 
             log.info("Library check: not found for '\(artist) — \(title)'")
@@ -273,35 +305,38 @@ final class AppleMusicService: ObservableObject {
 
             log.info("Library search (API) returned \(data.count) results")
 
-            func extractAttrs(_ item: [String: Any]) -> (String, String)? {
+            func extractAttrs(_ item: [String: Any]) -> (String, String, String)? {
                 guard let attrs = item["attributes"] as? [String: Any],
                       let songTitle = attrs["name"] as? String,
-                      let songArtist = attrs["artistName"] as? String else { return nil }
-                return (songTitle, songArtist)
+                      let songArtist = attrs["artistName"] as? String,
+                      let id = item["id"] as? String else { return nil }
+                return (songTitle, songArtist, id)
             }
 
             // Exact match
             if let item = data.first(where: { item in
-                guard let (songTitle, songArtist) = extractAttrs(item) else { return false }
+                guard let (songTitle, songArtist, _) = extractAttrs(item) else { return false }
                 return songTitle.localizedCaseInsensitiveCompare(title) == .orderedSame
                     && songArtist.localizedCaseInsensitiveCompare(artist) == .orderedSame
-            }), let (songTitle, songArtist) = extractAttrs(item) {
-                log.info("Library check: FOUND (exact match)")
-                return LibraryMatch(title: songTitle, artist: songArtist)
+            }), let (songTitle, songArtist, id) = extractAttrs(item) {
+                let isLoved = await fetchLibraryRating(libraryId: id) == 1
+                log.info("Library check: FOUND (exact match), loved=\(isLoved)")
+                return LibraryMatch(title: songTitle, artist: songArtist, isLoved: isLoved)
             }
 
             // Relaxed match
             if let item = data.first(where: { item in
-                guard let (songTitle, songArtist) = extractAttrs(item) else { return false }
+                guard let (songTitle, songArtist, _) = extractAttrs(item) else { return false }
                 if liveStatusMismatch(songTitle, title) { return false }
                 let titleMatch = songTitle.localizedCaseInsensitiveCompare(title) == .orderedSame
                     || cleanTitle(songTitle).localizedCaseInsensitiveCompare(cleanTitle(title)) == .orderedSame
                 let artistMatch = songArtist.localizedStandardContains(artist)
                     || artist.localizedStandardContains(songArtist)
                 return titleMatch && artistMatch
-            }), let (songTitle, songArtist) = extractAttrs(item) {
-                log.info("Library check: FOUND (relaxed match)")
-                return LibraryMatch(title: songTitle, artist: songArtist)
+            }), let (songTitle, songArtist, id) = extractAttrs(item) {
+                let isLoved = await fetchLibraryRating(libraryId: id) == 1
+                log.info("Library check: FOUND (relaxed match), loved=\(isLoved)")
+                return LibraryMatch(title: songTitle, artist: songArtist, isLoved: isLoved)
             }
 
             log.info("Library check: not found for '\(artist) — \(title)'")

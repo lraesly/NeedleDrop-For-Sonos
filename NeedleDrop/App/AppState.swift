@@ -620,8 +620,11 @@ final class AppState: ObservableObject {
                         title: track.title, artist: track.artist
                     )
                     if let libraryMatch {
-                        log.info("Track in Apple Music library: \(track.artist) — \(track.title)")
+                        log.info("Track in Apple Music library: \(track.artist) — \(track.title) (loved=\(libraryMatch.isLoved))")
                         self.savedTrackIds.insert(track.id)
+                        if libraryMatch.isLoved {
+                            self.lovedTrackIds.insert(track.id)
+                        }
                         self.playSessionManager.setLibraryMatch(
                             for: track.id, match: libraryMatch
                         )
