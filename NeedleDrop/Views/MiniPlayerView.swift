@@ -212,13 +212,22 @@ struct MiniPlayerView: View {
                 if !track.isDJSegment {
                     do {
                         let isSaved = appState.savedTrackIds.contains(track.id)
+                        let isLoved = appState.lovedTrackIds.contains(track.id)
                         let isSaving = appState.savingTrackId == track.id
                         let canSave = appState.canSaveToLibrary
 
-                        if isSaved {
+                        if isLoved {
                             Image(systemName: "heart.fill")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.red)
+                        } else if isSaved {
+                            Button(action: { appState.saveToLibrary() }) {
+                                Image(systemName: isSaving ? "heart.fill" : "bookmark.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(isSaving ? .red.opacity(0.4) : iconColor.opacity(0.7))
+                            }
+                            .buttonStyle(HoverButtonStyle())
+                            .disabled(isSaving)
                         } else {
                             Button(action: { appState.saveToLibrary() }) {
                                 Image(systemName: isSaving ? "heart.fill" : "heart")
@@ -362,13 +371,22 @@ struct MiniPlayerView: View {
                 if !track.isDJSegment {
                     do {
                         let isSaved = appState.savedTrackIds.contains(track.id)
+                        let isLoved = appState.lovedTrackIds.contains(track.id)
                         let isSaving = appState.savingTrackId == track.id
                         let canSave = appState.canSaveToLibrary
 
-                        if isSaved {
+                        if isLoved {
                             Image(systemName: "heart.fill")
                                 .font(.system(size: 14))
                                 .foregroundStyle(.red)
+                        } else if isSaved {
+                            Button(action: { appState.saveToLibrary() }) {
+                                Image(systemName: isSaving ? "heart.fill" : "bookmark.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(isSaving ? .red.opacity(0.4) : iconColor.opacity(0.7))
+                            }
+                            .buttonStyle(HoverButtonStyle())
+                            .disabled(isSaving)
                         } else {
                             Button(action: { appState.saveToLibrary() }) {
                                 Image(systemName: isSaving ? "heart.fill" : "heart")

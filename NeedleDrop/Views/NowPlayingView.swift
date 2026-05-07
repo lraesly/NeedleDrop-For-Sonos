@@ -185,16 +185,29 @@ struct NowPlayingView: View {
     private var heartButton: some View {
         let trackId = nowPlaying.track?.id
         let isSaved = trackId.map { appState.savedTrackIds.contains($0) } ?? false
+        let isLoved = trackId.map { appState.lovedTrackIds.contains($0) } ?? false
         let isSaving = trackId != nil && appState.savingTrackId == trackId
         let canSave = appState.canSaveToLibrary
         let autoAddOn = appState.autoAddToAppleMusic
 
-        if isSaved {
-            // Show a plain image — no disabled-button dimming
+        if isLoved {
+            // Loved — filled red heart, no action.
             Image(systemName: "heart.fill")
                 .font(.body)
                 .foregroundColor(.red)
-                .help("In your library")
+                .help("Loved")
+        } else if isSaved {
+            // In library but not loved (auto-added or pre-existing). Click to love.
+            Button {
+                appState.saveToLibrary()
+            } label: {
+                Image(systemName: isSaving ? "heart.fill" : "bookmark.fill")
+                    .font(.body)
+                    .foregroundColor(isSaving ? .red.opacity(0.4) : .secondary)
+            }
+            .buttonStyle(HoverButtonStyle())
+            .help("In your library — click to love")
+            .disabled(isSaving)
         } else if autoAddOn {
             // Auto-add is handling library saves for this session — heart is redundant.
             // Show a dimmed outline so the layout doesn't shift.

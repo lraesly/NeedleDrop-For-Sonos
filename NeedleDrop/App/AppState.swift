@@ -98,6 +98,9 @@ final class AppState: ObservableObject {
     @Published var lastSaveResult: LibrarySaveDetail?
     /// Track IDs that have been successfully saved this session.
     @Published var savedTrackIds: Set<String> = []
+    /// Track IDs we've explicitly loved this session (manual heart tap).
+    /// A subset of savedTrackIds — auto-added tracks are saved but not loved.
+    @Published var lovedTrackIds: Set<String> = []
     /// Track ID currently being saved (for in-progress heart animation).
     @Published var savingTrackId: String?
     /// Brief warning shown near the heart button (e.g., "Apple Music disconnected").
@@ -106,7 +109,13 @@ final class AppState: ObservableObject {
     /// Session-scoped opt-in: when on, every newly resolved track is added to the
     /// user's Apple Music library (without loving) unless already present.
     /// Resets to off on zone change or source (enqueuedURI) change.
-    @Published var autoAddToAppleMusic: Bool = false
+    @Published var autoAddToAppleMusic: Bool = false {
+        didSet {
+            if autoAddToAppleMusic != oldValue {
+                log.info("Auto-add toggled: \(self.autoAddToAppleMusic)")
+            }
+        }
+    }
     /// Track IDs we've already attempted to auto-add this session, to prevent
     /// duplicate save attempts when the same track resurfaces.
     private var autoAddAttemptedTrackIds: Set<String> = []
@@ -352,6 +361,7 @@ final class AppState: ObservableObject {
                 // Clear session-level caches to reclaim memory during sleep
                 self.scrobbleTracker.scrobbledTrackIds.removeAll()
                 self.savedTrackIds.removeAll()
+                self.lovedTrackIds.removeAll()
                 await self.eventHandler.albumArtEnricher.clearCache()
                 ImageCache.shared.clearAll()
             }
@@ -1779,6 +1789,9 @@ final class AppState: ObservableObject {
 
             if result.success {
                 self.savedTrackIds.insert(track.id)
+                // Manual heart tap loves the track (the underlying searchAndSave
+                // call defaults to love: true), so mark it accordingly.
+                self.lovedTrackIds.insert(track.id)
             }
 
         }
