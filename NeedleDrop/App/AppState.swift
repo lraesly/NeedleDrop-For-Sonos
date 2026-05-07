@@ -103,6 +103,13 @@ final class AppState: ObservableObject {
     /// Brief warning shown near the heart button (e.g., "Apple Music disconnected").
     /// Auto-clears after a few seconds.
     @Published var saveWarningMessage: String?
+    /// Session-scoped opt-in: when on, every newly resolved track is added to the
+    /// user's Apple Music library (without loving) unless already present.
+    /// Resets to off on zone change or source (enqueuedURI) change.
+    @Published var autoAddToAppleMusic: Bool = false
+    /// Track IDs we've already attempted to auto-add this session, to prevent
+    /// duplicate save attempts when the same track resurfaces.
+    private var autoAddAttemptedTrackIds: Set<String> = []
 
     // MARK: - Playback Position
 
@@ -484,6 +491,20 @@ final class AppState: ObservableObject {
                 guard let self else { return }
                 let oldTrackId = self.nowPlaying.track?.id
                 let newTrackId = nowPlaying.track?.id
+                let oldEnqueuedURI = self.nowPlaying.enqueuedURI
+                let newEnqueuedURI = nowPlaying.enqueuedURI
+
+                // Source change (different station/favorite/playlist loaded) cancels
+                // auto-add — the user's opt-in was scoped to the previous source.
+                // A nil → URI transition (e.g., resuming after stop) does NOT reset.
+                if self.autoAddToAppleMusic,
+                   let newURI = newEnqueuedURI,
+                   let oldURI = oldEnqueuedURI,
+                   newURI != oldURI {
+                    log.info("Source changed (\(oldURI) → \(newURI)) — disabling auto-add")
+                    self.autoAddToAppleMusic = false
+                    self.autoAddAttemptedTrackIds.removeAll()
+                }
 
                 // Preserve enriched fields when the same track is re-published
                 // with missing data (e.g., resubscribe → fetchCurrentState returns
@@ -594,6 +615,26 @@ final class AppState: ObservableObject {
                         self.playSessionManager.setLibraryMatch(
                             for: track.id, match: libraryMatch
                         )
+                        return
+                    }
+
+                    // Not in library — auto-add if the user has opted in for this session.
+                    guard self.autoAddToAppleMusic else { return }
+                    guard !self.autoAddAttemptedTrackIds.contains(track.id) else { return }
+                    guard self.savingTrackId == nil else { return }
+
+                    self.autoAddAttemptedTrackIds.insert(track.id)
+                    self.savingTrackId = track.id
+                    log.info("Auto-adding to Apple Music: \(track.artist) — \(track.title)")
+
+                    let result = await self.appleMusicService.searchAndSave(
+                        title: track.title, artist: track.artist, love: false
+                    )
+                    self.savingTrackId = nil
+                    if result.success {
+                        self.savedTrackIds.insert(track.id)
+                    } else {
+                        log.warning("Auto-add failed: \(result.message ?? "unknown")")
                     }
                 }
             }
@@ -759,6 +800,13 @@ final class AppState: ObservableObject {
         }
 
         selectedZone = coordinatorUUID
+
+        // Zone change scopes auto-add to a single zone/source — disable on switch.
+        if autoAddToAppleMusic {
+            log.info("Zone changed — disabling auto-add")
+            autoAddToAppleMusic = false
+        }
+        autoAddAttemptedTrackIds.removeAll()
 
         guard let zone = activeZone else { return }
         log.info("Selected zone: \(zone.roomName) — coordinator \(zone.coordinator.uuid) @ \(zone.coordinator.ip)")

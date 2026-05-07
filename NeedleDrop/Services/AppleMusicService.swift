@@ -312,8 +312,10 @@ final class AppleMusicService: ObservableObject {
         }
     }
 
-    /// Search the Apple Music catalog for a track, add it to the user's library, and love it.
-    func searchAndSave(title: String, artist: String) async -> ServiceSaveResult {
+    /// Search the Apple Music catalog for a track, add it to the user's library,
+    /// and optionally love it. Pass `love: false` for background auto-adds where
+    /// the user hasn't expressed an explicit preference for the track.
+    func searchAndSave(title: String, artist: String, love: Bool = true) async -> ServiceSaveResult {
         guard isConnected else {
             log.warning("Save skipped — Apple Music not connected")
             return ServiceSaveResult(
@@ -365,23 +367,25 @@ final class AppleMusicService: ObservableObject {
                 )
             }
 
-            // Also "Love" the track so it shows a heart in Apple Music.
-            // PUT /v1/me/ratings/songs/{id} with value=1
-            log.info("Rating track: \(song.id.rawValue)")
-            let ratingURL = URL(
-                string: "https://api.music.apple.com/v1/me/ratings/songs/\(song.id.rawValue)"
-            )!
-            var ratingRequest = URLRequest(url: ratingURL)
-            ratingRequest.httpMethod = "PUT"
-            ratingRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            ratingRequest.httpBody = try JSONSerialization.data(withJSONObject: [
-                "type": "rating",
-                "attributes": ["value": 1]
-            ])
+            if love {
+                // Also "Love" the track so it shows a heart in Apple Music.
+                // PUT /v1/me/ratings/songs/{id} with value=1
+                log.info("Rating track: \(song.id.rawValue)")
+                let ratingURL = URL(
+                    string: "https://api.music.apple.com/v1/me/ratings/songs/\(song.id.rawValue)"
+                )!
+                var ratingRequest = URLRequest(url: ratingURL)
+                ratingRequest.httpMethod = "PUT"
+                ratingRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                ratingRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "type": "rating",
+                    "attributes": ["value": 1]
+                ])
 
-            let ratingDataRequest = MusicDataRequest(urlRequest: ratingRequest)
-            _ = try? await ratingDataRequest.response()
-            // Rating is best-effort — don't fail the save if it errors
+                let ratingDataRequest = MusicDataRequest(urlRequest: ratingRequest)
+                _ = try? await ratingDataRequest.response()
+                // Rating is best-effort — don't fail the save if it errors
+            }
 
             log.info("Saved to Apple Music: \(song.title)")
             return ServiceSaveResult(

@@ -187,6 +187,7 @@ struct NowPlayingView: View {
         let isSaved = trackId.map { appState.savedTrackIds.contains($0) } ?? false
         let isSaving = trackId != nil && appState.savingTrackId == trackId
         let canSave = appState.canSaveToLibrary
+        let autoAddOn = appState.autoAddToAppleMusic
 
         if isSaved {
             // Show a plain image — no disabled-button dimming
@@ -194,6 +195,13 @@ struct NowPlayingView: View {
                 .font(.body)
                 .foregroundColor(.red)
                 .help("In your library")
+        } else if autoAddOn {
+            // Auto-add is handling library saves for this session — heart is redundant.
+            // Show a dimmed outline so the layout doesn't shift.
+            Image(systemName: isSaving ? "heart.fill" : "heart")
+                .font(.body)
+                .foregroundColor(isSaving ? .red.opacity(0.4) : .secondary.opacity(0.3))
+                .help("Auto-add is on")
         } else {
             VStack(spacing: 2) {
                 Button {

@@ -386,7 +386,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -d \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/PlugIns\" ]; then\n  echo \"Skipping install — test bundle embedded\"\n  exit 0\nfi\n\n# Kill running instance so the bundle isn't locked\nkillall \"${PRODUCT_NAME}\" 2>/dev/null || true\nsleep 0.5\n\nrm -rf \"/Applications/${PRODUCT_NAME}.app\"\nditto \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\" \"/Applications/${PRODUCT_NAME}.app\"\n";
+			shellScript = "if [ -d \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/PlugIns\" ]; then\n  echo \"Skipping install — test bundle embedded\"\n  exit 0\nfi\n\n# Kill running instance so the bundle isn't locked\nkillall \"${PRODUCT_NAME}\" 2>/dev/null || true\nsleep 0.5\n\nDEST=\"/Applications/${PRODUCT_NAME}.app\"\nrm -rf \"$DEST\"\nditto \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\" \"$DEST\"\n\n# This phase runs before Xcode's built-in CodeSign step, so the bundle\n# we just copied is unsigned. macOS denies Local Network access (and\n# other entitlements-gated APIs) to unsigned apps, which silently breaks\n# Sonos discovery. Re-sign the destination ourselves so xcodebuild from\n# the CLI also produces a working install. (Xcode will independently\n# sign the BUILT_PRODUCTS_DIR copy as its final build step.)\nCODESIGN_FLAGS=\"--force --sign - --timestamp=none --generate-entitlement-der --deep\"\nif [ \"${ENABLE_HARDENED_RUNTIME}\" = \"YES\" ]; then\n  CODESIGN_FLAGS=\"$CODESIGN_FLAGS --options runtime\"\nfi\ncodesign $CODESIGN_FLAGS --entitlements \"${PROJECT_DIR}/NeedleDrop/NeedleDrop.entitlements\" \"$DEST\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

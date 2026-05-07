@@ -190,9 +190,14 @@ struct MenuBarView: View {
 
             Spacer()
 
-            Text("NeedleDrop v2")
+            Toggle("Add", isOn: $appState.autoAddToAppleMusic)
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .disabled(!appState.appleMusicService.isConnected)
+                .help(appState.appleMusicService.isConnected
+                      ? "Auto-add resolved tracks to your Apple Music library. Resets when zone or station changes."
+                      : "Connect Apple Music in Setup to enable auto-add")
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
