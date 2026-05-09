@@ -92,23 +92,48 @@ final class AppleMusicService: ObservableObject {
         return aLive != bLive
     }
 
+    /// Normalize a name for fuzzy comparison: lowercase + strip everything that
+    /// isn't a letter or digit. Lets "R.E.M." match "REM", "Beyoncé" match
+    /// "Beyonce", curly vs. straight apostrophes match, etc.
+    private func normalizeForMatch(_ s: String) -> String {
+        let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        return folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+            .reduce(into: "") { $0.append(Character($1)) }
+    }
+
+    /// Loose artist comparison: equal after normalization, or one normalized
+    /// form contains the other (handles "Beatles" vs "The Beatles").
+    private func artistMatches(_ a: String, _ b: String) -> Bool {
+        let na = normalizeForMatch(a)
+        let nb = normalizeForMatch(b)
+        if na.isEmpty || nb.isEmpty { return false }
+        return na == nb || na.contains(nb) || nb.contains(na)
+    }
+
     /// Search catalog, trying exact title first, then cleaned title on miss,
     /// then song-only part (before " - ") for radio stations that send
     /// "SongTitle - AlbumName [Label Year]".
+    ///
+    /// - Parameter durationSeconds: When provided, the catalog picker prefers
+    ///   the candidate whose runtime is within ±4s of the playing track —
+    ///   helps disambiguate when several catalog versions share the same
+    ///   title/artist (e.g. studio vs. extended mix vs. live).
     private func searchTrack(
-        title: String, artist: String
+        title: String, artist: String, durationSeconds: Int? = nil
     ) async throws -> Song? {
         // First try: exact title
-        if let song = try await catalogSearch(title: title, artist: artist),
-           song.artwork != nil {
+        if let song = try await catalogSearch(
+            title: title, artist: artist, durationSeconds: durationSeconds
+        ), song.artwork != nil {
             return song
         }
 
         // Second try: cleaned title (strip parenthetical/bracketed noise)
         let cleaned = cleanTitle(title)
         if cleaned != title,
-           let song = try await catalogSearch(title: cleaned, artist: artist),
-           song.artwork != nil {
+           let song = try await catalogSearch(
+               title: cleaned, artist: artist, durationSeconds: durationSeconds
+           ), song.artwork != nil {
             return song
         }
 
@@ -118,8 +143,9 @@ final class AppleMusicService: ObservableObject {
         if parts.count == 2 {
             let songOnly = String(parts[0]).trimmingCharacters(in: .whitespaces)
             if !songOnly.isEmpty,
-               let song = try await catalogSearch(title: songOnly, artist: artist),
-               song.artwork != nil {
+               let song = try await catalogSearch(
+                   title: songOnly, artist: artist, durationSeconds: durationSeconds
+               ), song.artwork != nil {
                 return song
             }
         }
@@ -129,7 +155,7 @@ final class AppleMusicService: ObservableObject {
 
     /// Single catalog search attempt — returns best match or nil.
     private func catalogSearch(
-        title: String, artist: String
+        title: String, artist: String, durationSeconds: Int?
     ) async throws -> Song? {
         let term = "\(artist) \(title)"
         log.info("Catalog search: \(term)")
@@ -144,13 +170,42 @@ final class AppleMusicService: ObservableObject {
 
         log.info("Search returned \(response.songs.count) results")
 
-        // Among candidates that match exact title+artist, pick the best
-        // release (non-compilation, earliest date). Fall back to picking
-        // the best release from all results when nothing matches exactly.
+        // Candidates with exact title+artist (often multiple — different albums).
         let exactMatches = response.songs.filter { song in
             song.title.localizedCaseInsensitiveCompare(title) == .orderedSame &&
             song.artistName.localizedCaseInsensitiveCompare(artist) == .orderedSame
         }
+
+        // When a playing duration is available, narrow each tier to candidates
+        // within ±4s — disambiguates studio vs. live vs. extended mixes that
+        // share the same title+artist. Within the narrowed set, BestReleasePicker
+        // still picks the original studio album over compilations / soundtracks.
+        if let playingDuration = durationSeconds, playingDuration > 0 {
+            let exactWithDuration = exactMatches.filter { song in
+                guard let d = song.duration else { return false }
+                return abs(Int(d.rounded()) - playingDuration) <= 4
+            }
+            if let song = BestReleasePicker.pickBest(among: exactWithDuration) {
+                let secs = Int((song.duration ?? 0).rounded())
+                log.info("Matched (exact + duration \(secs)s ≈ \(playingDuration)s): \(song.artistName) – \(song.title) — \(song.albumTitle ?? "?") (id: \(song.id.rawValue))")
+                return song
+            }
+            let artistWithDuration = response.songs.filter { song in
+                guard let d = song.duration else { return false }
+                let withinTolerance = abs(Int(d.rounded()) - playingDuration) <= 4
+                let artistMatch = song.artistName.localizedStandardContains(artist)
+                    || artist.localizedStandardContains(song.artistName)
+                return withinTolerance && artistMatch
+            }
+            if let song = BestReleasePicker.pickBest(among: artistWithDuration) {
+                let secs = Int((song.duration ?? 0).rounded())
+                log.info("Matched (duration \(secs)s ≈ \(playingDuration)s): \(song.artistName) – \(song.title) — \(song.albumTitle ?? "?") (id: \(song.id.rawValue))")
+                return song
+            }
+        }
+
+        // No duration, or duration tiers found nothing: best release among
+        // exact matches, else best release from all results.
         let match = BestReleasePicker.pickBest(among: exactMatches)
             ?? BestReleasePicker.pickBest(among: Array(response.songs))
 
@@ -165,7 +220,15 @@ final class AppleMusicService: ObservableObject {
     /// Returns the matched library title and artist if found, so that downstream
     /// consumers (e.g. play count AppleScript) can look up the track by its
     /// actual library name rather than the raw stream title.
-    func isInLibrary(title: String, artist: String) async -> LibraryMatch? {
+    ///
+    /// - Parameter durationSeconds: Optional play time of the currently playing
+    ///   track. When provided, the matcher runs a final duration-rescue pass
+    ///   that accepts a library entry if the artist overlaps and the runtime
+    ///   is within ±4 seconds — catches cross-album dupes whose titles diverge
+    ///   in ways the title cleaner can't normalize (e.g. " - Single Version").
+    func isInLibrary(
+        title: String, artist: String, durationSeconds: Int? = nil
+    ) async -> LibraryMatch? {
         guard isConnected else {
             log.debug("Library check skipped — not connected")
             return nil
@@ -174,29 +237,39 @@ final class AppleMusicService: ObservableObject {
         log.info("Library check: \(artist) — \(title)")
 
         // Try with original title first, then cleaned title
-        if let match = await librarySearch(title: title, artist: artist) {
+        if let match = await librarySearch(
+            title: title, artist: artist, durationSeconds: durationSeconds
+        ) {
             return match
         }
 
         let cleaned = cleanTitle(title)
         if cleaned != title {
             log.info("Retrying library check with cleaned title: \(cleaned)")
-            return await librarySearch(title: cleaned, artist: artist)
+            return await librarySearch(
+                title: cleaned, artist: artist, durationSeconds: durationSeconds
+            )
         }
 
         return nil
     }
 
     /// Single library search attempt — returns the matched track info if found.
-    private func librarySearch(title: String, artist: String) async -> LibraryMatch? {
+    private func librarySearch(
+        title: String, artist: String, durationSeconds: Int?
+    ) async -> LibraryMatch? {
         // Use MusicKit's native library search (macOS 14+).
         // The raw /v1/me/library/search endpoint returns empty results
         // when Sync Library is off — MusicLibraryRequest queries the
         // local database directly and works regardless.
         if #available(macOS 14.0, *) {
-            return await librarySearchNative(title: title, artist: artist)
+            return await librarySearchNative(
+                title: title, artist: artist, durationSeconds: durationSeconds
+            )
         } else {
-            return await librarySearchAPI(title: title, artist: artist)
+            return await librarySearchAPI(
+                title: title, artist: artist, durationSeconds: durationSeconds
+            )
         }
     }
 
@@ -232,7 +305,9 @@ final class AppleMusicService: ObservableObject {
     /// Queries the local library database directly — works even without
     /// iCloud Music Library / Sync Library enabled.
     @available(macOS 14.0, *)
-    private func librarySearchNative(title: String, artist: String) async -> LibraryMatch? {
+    private func librarySearchNative(
+        title: String, artist: String, durationSeconds: Int?
+    ) async -> LibraryMatch? {
         do {
             var request = MusicLibraryRequest<Song>()
             request.filter(matching: \.title, contains: title)
@@ -268,6 +343,35 @@ final class AppleMusicService: ObservableObject {
                 return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
             }
 
+            // Duration-rescue match within title-filtered candidates.
+            // Catches title decoration cleanTitle can't strip (e.g. " - 2009
+            // Remaster") — the runtime still pins it down. ±4s; live versions
+            // naturally fall outside this window.
+            if let playingDuration = durationSeconds, playingDuration > 0,
+               let song = response.items.first(where: { song in
+                   guard let songDuration = song.duration else { return false }
+                   let secs = Int(songDuration.rounded())
+                   return abs(secs - playingDuration) <= 4
+                       && artistMatches(song.artistName, artist)
+               }) {
+                let isLoved = await fetchLibraryRating(libraryId: song.id.rawValue) == 1
+                let songSecs = Int((song.duration ?? 0).rounded())
+                log.info("Library check: FOUND (duration match: \(songSecs)s ≈ \(playingDuration)s), loved=\(isLoved)")
+                return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
+            }
+
+            // Final safety net: title-contains may have missed entirely (curly
+            // vs. straight apostrophe, "(And I Feel Fine)" vs. parens-stripped,
+            // articles like "The "). Re-query by artist and pick the song
+            // whose runtime is within ±4s and whose normalized title matches.
+            if let playingDuration = durationSeconds, playingDuration > 0 {
+                if let match = await librarySearchByArtist(
+                    title: title, artist: artist, durationSeconds: playingDuration
+                ) {
+                    return match
+                }
+            }
+
             log.info("Library check: not found for '\(artist) — \(title)'")
             return nil
         } catch {
@@ -276,8 +380,72 @@ final class AppleMusicService: ObservableObject {
         }
     }
 
+    /// Artist-scoped library lookup with title+duration scoring. Used as a
+    /// fallback when title-contains filtering returns nothing (curly-quote
+    /// mismatches, parenthetical noise the cleaner can't normalize, etc.).
+    @available(macOS 14.0, *)
+    private func librarySearchByArtist(
+        title: String, artist: String, durationSeconds: Int
+    ) async -> LibraryMatch? {
+        do {
+            var request = MusicLibraryRequest<Song>()
+            request.filter(matching: \.artistName, contains: artist)
+            request.limit = 100
+            let response = try await request.response()
+
+            log.info("Library search by artist '\(artist)' returned \(response.items.count) results")
+
+            let normTitle = normalizeForMatch(title)
+            let normTitleClean = normalizeForMatch(cleanTitle(title))
+
+            // Prefer songs whose normalized title matches AND duration is in tolerance.
+            // Fall back to duration-only when no title overlap is available.
+            let candidates: [(Song, Int)] = response.items.compactMap { song in
+                guard let d = song.duration else { return nil }
+                let secs = Int(d.rounded())
+                guard abs(secs - durationSeconds) <= 4 else { return nil }
+                if liveStatusMismatch(song.title, title) { return nil }
+                return (song, abs(secs - durationSeconds))
+            }
+
+            // Tier 1: normalized title equality (strongest)
+            if let song = candidates.first(where: { (s, _) in
+                let n = normalizeForMatch(s.title)
+                let nClean = normalizeForMatch(cleanTitle(s.title))
+                return n == normTitle || nClean == normTitleClean
+            })?.0 {
+                let isLoved = await fetchLibraryRating(libraryId: song.id.rawValue) == 1
+                let secs = Int((song.duration ?? 0).rounded())
+                log.info("Library check: FOUND (artist+title+duration: \(secs)s ≈ \(durationSeconds)s), loved=\(isLoved)")
+                return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
+            }
+
+            // Tier 2: closest duration with substring title overlap either way
+            if let song = candidates
+                .filter({ (s, _) in
+                    let n = normalizeForMatch(s.title)
+                    let nClean = normalizeForMatch(cleanTitle(s.title))
+                    return n.contains(normTitle) || normTitle.contains(n)
+                        || nClean.contains(normTitleClean) || normTitleClean.contains(nClean)
+                })
+                .min(by: { $0.1 < $1.1 })?.0 {
+                let isLoved = await fetchLibraryRating(libraryId: song.id.rawValue) == 1
+                let secs = Int((song.duration ?? 0).rounded())
+                log.info("Library check: FOUND (artist+duration\(secs)s ≈ \(durationSeconds)s, title overlap), loved=\(isLoved)")
+                return LibraryMatch(title: song.title, artist: song.artistName, isLoved: isLoved)
+            }
+
+            return nil
+        } catch {
+            log.debug("Library search by artist failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Fallback library search using the raw Apple Music API (macOS 13).
-    private func librarySearchAPI(title: String, artist: String) async -> LibraryMatch? {
+    private func librarySearchAPI(
+        title: String, artist: String, durationSeconds: Int?
+    ) async -> LibraryMatch? {
         do {
             var components = URLComponents(
                 string: "https://api.music.apple.com/v1/me/library/search"
@@ -343,6 +511,29 @@ final class AppleMusicService: ObservableObject {
                 return LibraryMatch(title: songTitle, artist: songArtist, isLoved: isLoved)
             }
 
+            // Duration-rescue match: title decoration that cleanTitle can't strip
+            // (e.g. "Yesterday - 2009 Remaster" vs "Yesterday") still produces the
+            // same runtime. If the artist overlaps and runtime is within ±4s,
+            // accept it — live versions naturally fall outside this window.
+            if let playingDuration = durationSeconds, playingDuration > 0,
+               let item = data.first(where: { item in
+                   guard let attrs = item["attributes"] as? [String: Any],
+                         let songArtist = attrs["artistName"] as? String,
+                         let durationMs = attrs["durationInMillis"] as? Int else { return false }
+                   let songSecs = (durationMs + 500) / 1000
+                   return abs(songSecs - playingDuration) <= 4
+                       && artistMatches(songArtist, artist)
+               }), let (songTitle, songArtist, id) = extractAttrs(item) {
+                let isLoved = await fetchLibraryRating(libraryId: id) == 1
+                let songSecs: Int = {
+                    let attrs = item["attributes"] as? [String: Any]
+                    let ms = attrs?["durationInMillis"] as? Int ?? 0
+                    return (ms + 500) / 1000
+                }()
+                log.info("Library check: FOUND (duration match: \(songSecs)s ≈ \(playingDuration)s), loved=\(isLoved)")
+                return LibraryMatch(title: songTitle, artist: songArtist, isLoved: isLoved)
+            }
+
             log.info("Library check: not found for '\(artist) — \(title)'")
             return nil
         } catch {
@@ -354,7 +545,12 @@ final class AppleMusicService: ObservableObject {
     /// Search the Apple Music catalog for a track, add it to the user's library,
     /// and optionally love it. Pass `love: false` for background auto-adds where
     /// the user hasn't expressed an explicit preference for the track.
-    func searchAndSave(title: String, artist: String, love: Bool = true) async -> ServiceSaveResult {
+    ///
+    /// - Parameter durationSeconds: Optional playing-track runtime used to
+    ///   disambiguate catalog versions (studio vs. live vs. extended mix).
+    func searchAndSave(
+        title: String, artist: String, love: Bool = true, durationSeconds: Int? = nil
+    ) async -> ServiceSaveResult {
         guard isConnected else {
             log.warning("Save skipped — Apple Music not connected")
             return ServiceSaveResult(
@@ -369,7 +565,9 @@ final class AppleMusicService: ObservableObject {
         log.info("Saving: \(artist) – \(title)")
 
         do {
-            guard let song = try await searchTrack(title: title, artist: artist) else {
+            guard let song = try await searchTrack(
+                title: title, artist: artist, durationSeconds: durationSeconds
+            ) else {
                 log.warning("Track not found on Apple Music")
                 return ServiceSaveResult(
                     service: "apple_music",
