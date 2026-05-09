@@ -617,7 +617,9 @@ final class AppState: ObservableObject {
             } else if appleMusicService.isConnected {
                 Task {
                     let libraryMatch = await appleMusicService.isInLibrary(
-                        title: track.title, artist: track.artist
+                        title: track.title,
+                        artist: track.artist,
+                        durationSeconds: track.durationSeconds > 0 ? track.durationSeconds : nil
                     )
                     if let libraryMatch {
                         log.info("Track in Apple Music library: \(track.artist) — \(track.title) (loved=\(libraryMatch.isLoved))")
@@ -641,7 +643,10 @@ final class AppState: ObservableObject {
                     log.info("Auto-adding to Apple Music: \(track.artist) — \(track.title)")
 
                     let result = await self.appleMusicService.searchAndSave(
-                        title: track.title, artist: track.artist, love: false
+                        title: track.title,
+                        artist: track.artist,
+                        love: false,
+                        durationSeconds: track.durationSeconds > 0 ? track.durationSeconds : nil
                     )
                     self.savingTrackId = nil
                     if result.success {
@@ -1776,7 +1781,11 @@ final class AppState: ObservableObject {
             if spotifyService.isConnected {
                 result = await spotifyService.searchAndSave(title: track.title, artist: track.artist)
             } else if appleMusicService.isConnected {
-                result = await appleMusicService.searchAndSave(title: track.title, artist: track.artist)
+                result = await appleMusicService.searchAndSave(
+                    title: track.title,
+                    artist: track.artist,
+                    durationSeconds: track.durationSeconds > 0 ? track.durationSeconds : nil
+                )
             } else {
                 self.savingTrackId = nil
                 self.showSaveWarning("Music service disconnected during save")
