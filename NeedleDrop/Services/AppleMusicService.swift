@@ -144,14 +144,18 @@ final class AppleMusicService: ObservableObject {
 
         log.info("Search returned \(response.songs.count) results")
 
-        // Prefer an exact artist+title match, fall back to first result
-        let match = response.songs.first(where: { song in
+        // Among candidates that match exact title+artist, pick the best
+        // release (non-compilation, earliest date). Fall back to picking
+        // the best release from all results when nothing matches exactly.
+        let exactMatches = response.songs.filter { song in
             song.title.localizedCaseInsensitiveCompare(title) == .orderedSame &&
             song.artistName.localizedCaseInsensitiveCompare(artist) == .orderedSame
-        }) ?? response.songs.first
+        }
+        let match = BestReleasePicker.pickBest(among: exactMatches)
+            ?? BestReleasePicker.pickBest(among: Array(response.songs))
 
         if let match {
-            log.info("Matched: \(match.artistName) – \(match.title) (id: \(match.id.rawValue))")
+            log.info("Matched: \(match.artistName) – \(match.title) — \(match.albumTitle ?? "?") (id: \(match.id.rawValue))")
         }
         return match
     }

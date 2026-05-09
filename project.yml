@@ -33,3 +33,32 @@ targets:
     dependencies:
       - package: SwiftUPnP
       - package: GRDB
+    postBuildScripts:
+      - name: Install to Applications
+        shell: /bin/sh
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ -d "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/PlugIns" ]; then
+            echo "Skipping install — test bundle embedded"
+            exit 0
+          fi
+
+          # Kill running instance so the bundle isn't locked
+          killall "${PRODUCT_NAME}" 2>/dev/null || true
+          sleep 0.5
+
+          DEST="/Applications/${PRODUCT_NAME}.app"
+          rm -rf "$DEST"
+          ditto "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app" "$DEST"
+
+          # This phase runs before Xcode's built-in CodeSign step, so the bundle
+          # we just copied is unsigned. macOS denies Local Network access (and
+          # other entitlements-gated APIs) to unsigned apps, which silently breaks
+          # Sonos discovery. Re-sign the destination ourselves so xcodebuild from
+          # the CLI also produces a working install. (Xcode will independently
+          # sign the BUILT_PRODUCTS_DIR copy as its final build step.)
+          CODESIGN_FLAGS="--force --sign - --timestamp=none --generate-entitlement-der --deep"
+          if [ "${ENABLE_HARDENED_RUNTIME}" = "YES" ]; then
+            CODESIGN_FLAGS="$CODESIGN_FLAGS --options runtime"
+          fi
+          codesign $CODESIGN_FLAGS --entitlements "${PROJECT_DIR}/NeedleDrop/NeedleDrop.entitlements" "$DEST"
