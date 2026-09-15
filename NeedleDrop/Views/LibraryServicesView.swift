@@ -9,6 +9,11 @@ struct LibraryServicesView: View {
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
+    /// Opt-in: count qualified radio/SiriusXM/Spotify plays of library tracks in Music.app.
+    /// Same key the AppleMusicPlayCountService reads on every drain; default off.
+    @AppStorage(AppleMusicPlayCountService.enabledDefaultsKey)
+    private var playCountSyncEnabled = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Spotify
@@ -154,6 +159,17 @@ struct LibraryServicesView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Toggle("Count radio plays in Music.app", isOn: $playCountSyncEnabled)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+                .disabled(!appState.appleMusicService.isConnected)
+                .help("When a track already in your Apple Music library plays on a radio, SiriusXM or Spotify station, increment its play count in Music.app. Off by default.")
+
+            Text("Bumps the Music.app play count of library tracks heard on radio stations. Requires Music.app to be open on this Mac.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12)
     }

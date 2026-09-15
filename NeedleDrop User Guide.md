@@ -248,6 +248,15 @@ NeedleDrop can save the currently playing track to your **Spotify** or **Apple M
 
 > **Note:** Only one library service can be active at a time. Connecting one will disconnect the other.
 
+### Counting radio plays in Music.app (optional, off by default)
+
+With Apple Music connected, you can enable **Count radio plays in Music.app** in the Library Services settings. When it is on and a track that is already in your Apple Music library plays for at least half its length (or 30 seconds on stations without duration) from a non-Apple-Music source such as SiriusXM, TuneIn or Spotify, NeedleDrop increments that track's play count in Music.app.
+
+Notes:
+- Off by default. Radio spins are not counted unless you turn this on.
+- Plays are queued and applied only while Music.app is open on this Mac, so a backlog can appear at once when Music.app launches.
+- Tracks are matched by title and artist; tracks not in your library are ignored.
+
 ### Saving a Track
 
 When a library service is connected, a **heart icon** appears next to the transport controls. Click it to save the current track. A filled red heart means the track has already been saved this session.

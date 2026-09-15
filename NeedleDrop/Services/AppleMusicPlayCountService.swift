@@ -23,10 +23,18 @@ final class AppleMusicPlayCountService {
     private let queueRepo: AppleMusicActionQueueRepository
     private var drainTimer: Timer?
 
+    /// UserDefaults key for the opt-in play count sync toggle (shared with LibraryServicesView).
+    static let enabledDefaultsKey = "appleMusicPlayCountEnabled"
+
     /// Whether Apple Music play count sync is enabled by the user.
+    ///
+    /// Opt-in, default **off**: when enabled, a qualified play of a library track from a
+    /// non-Apple-Music source (SiriusXM, TuneIn, Spotify, SMB) increments that track's
+    /// play count in Music.app. Left on by default this silently inflated play counts
+    /// with radio spins, so the user must turn it on in Setup → Library Services.
     var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "appleMusicPlayCountEnabled") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "appleMusicPlayCountEnabled") }
+        get { UserDefaults.standard.object(forKey: Self.enabledDefaultsKey) as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: Self.enabledDefaultsKey) }
     }
 
     init(dbPool: DatabasePool) {
