@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Displays the currently playing track with album art, title, artist,
 /// transport controls, and volume slider.
@@ -72,6 +73,7 @@ struct NowPlayingView: View {
                     }
                 }
                 .help("Click to enlarge")
+                .contextMenu { albumArtContextMenu(track: track) }
             }
 
             // Track info
@@ -131,6 +133,55 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .contextMenu {
+            if !track.isTVAudio, !track.title.isEmpty {
+                Button("Copy Track Details") { copyTrackDetails(track) }
+                Button("Copy Title") { copyToClipboard(track.title) }
+                if !track.artist.isEmpty {
+                    Button("Copy Artist") { copyToClipboard(track.artist) }
+                }
+                if let album = track.album, !album.isEmpty {
+                    Button("Copy Album") { copyToClipboard(album) }
+                }
+            }
+        }
+    }
+
+    // MARK: - Album Art Menu
+
+    /// Right-click menu shown on the album art tile. Refresh re-queries
+    /// iTunes, Ignore marks the current URL so iTunes won't surface it
+    /// again, Search Alternative opens a picker over the dropdown.
+    @ViewBuilder
+    private func albumArtContextMenu(track: TrackInfo) -> some View {
+        if !track.artist.isEmpty, !track.title.isEmpty {
+            Button("Refresh Art") { appState.refreshAlbumArt() }
+            Button("Search Alternative Art\u{2026}") {
+                appState.altArtPickerWindow.show(appState: appState)
+            }
+            if track.albumArtURL != nil {
+                Button("Ignore This Art") { appState.ignoreCurrentAlbumArt() }
+            }
+        }
+    }
+
+    // MARK: - Clipboard
+
+    /// Format the playing track as `Artist / Album / Track` and place it on
+    /// the pasteboard. Album line is omitted when the source has no album
+    /// (radio streams, station IDs).
+    private func copyTrackDetails(_ track: TrackInfo) {
+        var lines: [String] = []
+        if !track.artist.isEmpty { lines.append("Artist: \(track.artist)") }
+        if let album = track.album, !album.isEmpty { lines.append("Album: \(album)") }
+        lines.append("Track: \(track.title)")
+        copyToClipboard(lines.joined(separator: "\n"))
+    }
+
+    private func copyToClipboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
     }
 
     // MARK: - Transport Controls
@@ -255,6 +306,10 @@ struct NowPlayingView: View {
 
             dropdownVolumeSlider
 
+            EditableVolumeLabel(value: appState.volume) { newLevel in
+                appState.setVolume(newLevel)
+            }
+
             Image(systemName: "speaker.wave.3.fill")
                 .font(.caption2)
                 .foregroundColor(.secondary)
@@ -348,10 +403,12 @@ struct NowPlayingView: View {
 
             speakerSlider(for: speaker)
 
-            Text("\(appState.groupSpeakerVolumes[speaker.uuid] ?? 0)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
-                .frame(width: 20, alignment: .trailing)
+            EditableVolumeLabel(
+                value: appState.groupSpeakerVolumes[speaker.uuid] ?? 0
+            ) { newLevel in
+                appState.groupSpeakerVolumes[speaker.uuid] = newLevel
+                appState.setVolumeForSpeaker(speaker.uuid, level: newLevel)
+            }
         }
     }
 
@@ -391,6 +448,57 @@ struct NowPlayingView: View {
             )
         }
         .frame(height: 10)
+    }
+
+    // MARK: - Editable Volume Label
+
+    /// Read-only volume readout that becomes an inline text field on click.
+    /// Enter (or focus loss) commits a clamped 0–100 value; Escape cancels.
+    /// Useful when you want to dial in a specific level instead of finding
+    /// it by drag.
+    fileprivate struct EditableVolumeLabel: View {
+        let value: Int
+        let onCommit: (Int) -> Void
+
+        @State private var isEditing = false
+        @State private var text = ""
+        @FocusState private var isFocused: Bool
+
+        var body: some View {
+            Group {
+                if isEditing {
+                    TextField("", text: $text)
+                        .textFieldStyle(.plain)
+                        .focused($isFocused)
+                        .font(.system(size: 10, design: .monospaced))
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit { commit() }
+                        .onExitCommand { isEditing = false }
+                        .onChange(of: isFocused) { focused in
+                            if !focused && isEditing { commit() }
+                        }
+                } else {
+                    Text("\(value)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .onTapGesture {
+                            text = "\(value)"
+                            isEditing = true
+                            isFocused = true
+                        }
+                        .help("Click to set volume")
+                }
+            }
+            .frame(width: 26, alignment: .trailing)
+        }
+
+        private func commit() {
+            defer { isEditing = false }
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            if let n = Int(trimmed) {
+                onCommit(max(0, min(100, n)))
+            }
+        }
     }
 
     // MARK: - Empty State

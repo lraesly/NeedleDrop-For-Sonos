@@ -26,6 +26,7 @@ final class SonosDiscoveryService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var pathMonitor: NWPathMonitor?
     private nonisolated(unsafe) var workspaceObservers: [NSObjectProtocol] = []
+    private var mdnsBrowser: NWBrowser?
 
     /// Set during system sleep to suppress network-change-triggered discovery.
     /// NWPathMonitor fires multiple rapid path changes as interfaces go down/up
@@ -81,10 +82,19 @@ final class SonosDiscoveryService: ObservableObject {
 
         // Background: SSDP multicast discovery
         startSSDPDiscovery()
+
+        // Background: Bonjour mDNS discovery. Many routers reflect mDNS across
+        // VLAN boundaries even when they don't reflect SSDP multicast, so this
+        // is the more reliable transport on segmented networks (UniFi IoT VLANs,
+        // OPNsense, etc.). On flat networks both transports find the same
+        // speakers; dedup happens via UUID.
+        startMDNSDiscovery()
     }
 
     func stopDiscovery() {
         UPnPRegistry.shared.stopDiscovery()
+        mdnsBrowser?.cancel()
+        mdnsBrowser = nil
         isDiscovering = false
     }
 
@@ -178,6 +188,87 @@ final class SonosDiscoveryService: ObservableObject {
         try? UPnPRegistry.shared.startDiscovery([Self.sonosDeviceType])
     }
 
+    // MARK: - Bonjour (mDNS) Discovery
+
+    /// Browse for `_sonos._tcp` advertisements. Each result's TXT record carries
+    /// a `location` URL pointing to the device description and a `householdid`
+    /// we can use to short-circuit the `GetHouseholdID` SOAP call later.
+    private func startMDNSDiscovery() {
+        // Cancel any previous browser before starting a new one (handles
+        // restart after sleep/wake or a network-change re-discovery).
+        mdnsBrowser?.cancel()
+
+        let descriptor = NWBrowser.Descriptor.bonjourWithTXTRecord(
+            type: "_sonos._tcp",
+            domain: nil
+        )
+        let params = NWParameters()
+        params.includePeerToPeer = false
+        let browser = NWBrowser(for: descriptor, using: params)
+
+        browser.stateUpdateHandler = { state in
+            switch state {
+            case .failed(let error):
+                log.error("Bonjour browser failed: \(error.localizedDescription)")
+            case .ready:
+                log.info("Bonjour browser ready (_sonos._tcp)")
+            case .cancelled:
+                log.debug("Bonjour browser cancelled")
+            default:
+                break
+            }
+        }
+
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            for result in results {
+                // Pull location URL + household from the TXT record.
+                guard case .bonjour(let txt) = result.metadata else { continue }
+                let dict = txt.dictionary
+                guard let locStr = dict["location"], !locStr.isEmpty,
+                      let url = URL(string: locStr),
+                      let host = url.host else { continue }
+
+                let householdID: String? = {
+                    if let h = dict["householdid"], !h.isEmpty { return h }
+                    return nil
+                }()
+
+                Task { @MainActor [weak self] in
+                    await self?.handleMDNSResult(ip: host, householdID: householdID)
+                }
+            }
+        }
+
+        browser.start(queue: .global(qos: .utility))
+        mdnsBrowser = browser
+    }
+
+    /// Handle a Bonjour-discovered Sonos endpoint. Fetches the device
+    /// description to learn UUID + roomName, then merges into `speakers`
+    /// with the householdID populated from the TXT record.
+    private func handleMDNSResult(ip: String, householdID: String?) async {
+        // If we already know this speaker (by IP), just upgrade the
+        // householdID in-place. Avoids a redundant device-description fetch.
+        if let existing = speakers.first(where: { $0.ip == ip }) {
+            if let hh = householdID, existing.householdID != hh {
+                var updated = existing
+                updated.householdID = hh
+                addOrUpdateSpeaker(updated)
+                log.debug("Bonjour upgraded householdID for \(existing.roomName): \(hh)")
+            }
+            return
+        }
+
+        guard let probed = await probeIP(ip, knownUUID: nil, knownName: nil) else {
+            log.debug("Bonjour: probe failed for \(ip)")
+            return
+        }
+        var device = probed
+        device.householdID = householdID
+        addOrUpdateSpeaker(device)
+        log.info("Bonjour discovered: \(device.roomName) at \(ip) (household: \(householdID ?? "unknown"))")
+    }
+
     private func handleDiscoveredUPnPDevice(_ device: UPnPDevice) {
         guard let definition = device.deviceDefinition?.device else { return }
 
@@ -266,14 +357,27 @@ final class SonosDiscoveryService: ObservableObject {
     // MARK: - Speaker Management
 
     private func addOrUpdateSpeaker(_ device: SonosDevice) {
-        if let index = speakers.firstIndex(where: { $0.uuid == device.uuid }) {
-            speakers[index] = device
+        var incoming = device
+        if let index = speakers.firstIndex(where: { $0.uuid == incoming.uuid }) {
+            let existing = speakers[index]
+            // Preserve resolved fields when the new discovery doesn't carry them.
+            // A Bonjour result has householdID but no SSDP friendlyName lineage,
+            // and an SSDP rediscovery never has householdID — neither path should
+            // wipe what the other established.
+            if incoming.householdID == nil { incoming.householdID = existing.householdID }
+            if incoming.groupId == nil { incoming.groupId = existing.groupId }
+
+            // Equality-guard: @Published var speakers fires objectWillChange on
+            // every write, so an unchanged value would cascade SwiftUI redraws
+            // through every observer.
+            if incoming == existing { return }
+            speakers[index] = incoming
         } else {
-            speakers.append(device)
+            speakers.append(incoming)
         }
 
         // Persist to cache for fast reconnection
-        speakerStore.cacheSpeaker(device)
+        speakerStore.cacheSpeaker(incoming)
     }
 
     // MARK: - Subnet Helpers

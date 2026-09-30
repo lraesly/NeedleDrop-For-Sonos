@@ -8,6 +8,11 @@ struct SonosDevice: Identifiable, Equatable, Codable {
     let ip: String            // e.g. "192.168.1.10"
     var isCoordinator: Bool   // true if this speaker is the group coordinator
     var groupId: String?      // shared among grouped speakers
+    /// Sonos household identifier (e.g. "Sonos_xxxxxxxxxxxx"). Populated when
+    /// discovered via Bonjour (carried in the TXT record) so the SOAP
+    /// `GetHouseholdID` round-trip can be skipped — measurable on S1 hardware
+    /// which throttles aggressively under topology pressure.
+    var householdID: String? = nil
 
     var id: String { uuid }
 

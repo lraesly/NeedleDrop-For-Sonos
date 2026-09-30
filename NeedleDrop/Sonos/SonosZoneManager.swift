@@ -394,7 +394,13 @@ private class ZoneGroupTopologyParser: NSObject, XMLParserDelegate {
             guard let coordUUID = currentCoordinatorUUID,
                   let coordinator = currentMembers.first(where: { $0.uuid == coordUUID }) else { return }
 
-            let members = currentMembers.filter { $0.uuid != coordUUID }
+            // Sort members by UUID for stable ordering. Sonos doesn't guarantee
+            // member order between topology fetches; without sorting, the per-
+            // speaker volume rows would reshuffle on every poll even when the
+            // grouping is unchanged.
+            let members = currentMembers
+                .filter { $0.uuid != coordUUID }
+                .sorted { $0.uuid < $1.uuid }
             let group = SonosZoneGroup(coordinator: coordinator, members: members)
             groups.append(group)
         }
