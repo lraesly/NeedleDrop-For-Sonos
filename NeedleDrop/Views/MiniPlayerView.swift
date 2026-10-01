@@ -256,51 +256,68 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private func largeMusicContent(track: TrackInfo, state: TransportState) -> some View {
         let isTV = track.isTVAudio
+        let showLyrics = appState.isMiniPlayerLyricsVisible && !isTV && !track.isDJSegment
 
-        // Large centered album art / TV icon
-        albumArt(track: track)
+        if showLyrics {
+            // Lyrics replace album art + the centered track info, keeping
+            // the rest of the layout (zone, progress, transport, volume)
+            // intact. Sized to roughly match the displaced art + info block.
+            LyricsView(
+                lyrics: appState.currentLyrics,
+                position: appState.playbackPosition,
+                textColor: titleColor,
+                highlightColor: transparent ? .white : .accentColor,
+                dimColor: transparent ? .white.opacity(0.5) : .secondary
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 250)
+            .shadow(color: shadow, radius: 2)
+        } else {
+            // Large centered album art / TV icon
+            albumArt(track: track)
 
-        // Centered track info
-        VStack(spacing: 2) {
-            Text(track.title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(titleColor)
-                .shadow(color: shadow, radius: 2)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            // Centered track info
+            VStack(spacing: 2) {
+                Text(track.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(titleColor)
+                    .shadow(color: shadow, radius: 2)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
 
-            Text(isTV ? (appState.nowPlaying.zoneName ?? "") : track.artist)
-                .font(.system(size: 13))
-                .foregroundStyle(subtitleColor)
-                .shadow(color: shadow, radius: 2)
-                .lineLimit(1)
+                Text(isTV ? (appState.nowPlaying.zoneName ?? "") : track.artist)
+                    .font(.system(size: 13))
+                    .foregroundStyle(subtitleColor)
+                    .shadow(color: shadow, radius: 2)
+                    .lineLimit(1)
 
-            if isTV {
-                if let zone = appState.activeZone, !zone.members.isEmpty {
-                    Text("\(zone.members.count + 1) speakers")
-                        .font(.system(size: 11))
-                        .foregroundStyle(tertiaryColor)
-                        .shadow(color: shadow, radius: 2)
-                        .lineLimit(1)
-                }
-            } else {
-                HStack(spacing: 4) {
-                    if let album = track.album, !album.isEmpty {
-                        Text(album)
+                if isTV {
+                    if let zone = appState.activeZone, !zone.members.isEmpty {
+                        Text("\(zone.members.count + 1) speakers")
                             .font(.system(size: 11))
                             .foregroundStyle(tertiaryColor)
                             .shadow(color: shadow, radius: 2)
                             .lineLimit(1)
-                            .layoutPriority(-1)
                     }
+                } else {
+                    HStack(spacing: 4) {
+                        if let album = track.album, !album.isEmpty {
+                            Text(album)
+                                .font(.system(size: 11))
+                                .foregroundStyle(tertiaryColor)
+                                .shadow(color: shadow, radius: 2)
+                                .lineLimit(1)
+                                .layoutPriority(-1)
+                        }
 
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.green)
-                        .shadow(color: shadow, radius: 2)
-                        .fixedSize()
-                        .help("Scrobbled")
-                        .opacity(appState.scrobbleTracker.isScrobbled(track.id) && appState.scrobblerClient.config != nil ? 1 : 0)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.green)
+                            .shadow(color: shadow, radius: 2)
+                            .fixedSize()
+                            .help("Scrobbled")
+                            .opacity(appState.scrobbleTracker.isScrobbled(track.id) && appState.scrobblerClient.config != nil ? 1 : 0)
+                    }
                 }
             }
         }
@@ -401,6 +418,8 @@ struct MiniPlayerView: View {
                         }
                     }
                 }
+
+                lyricsToggleButton
             }
         }
         .foregroundStyle(transportColor)
@@ -408,6 +427,26 @@ struct MiniPlayerView: View {
 
         // Full-width volume slider
         volumeControl()
+    }
+
+    // MARK: - Lyrics Toggle
+
+    /// Toggle button for the large mini player's lyrics overlay. The button
+    /// itself is always available in the transport row; the lyrics scroller
+    /// only replaces album art when synced lyrics for the current track
+    /// have actually loaded — the empty state shows briefly otherwise.
+    @ViewBuilder
+    private var lyricsToggleButton: some View {
+        let isOn = appState.isMiniPlayerLyricsVisible
+        Button {
+            appState.isMiniPlayerLyricsVisible.toggle()
+        } label: {
+            Image(systemName: isOn ? "text.bubble.fill" : "text.bubble")
+                .font(.system(size: 14))
+                .foregroundStyle(isOn ? (transparent ? Color.white : Color.accentColor) : iconColor.opacity(0.7))
+        }
+        .buttonStyle(HoverButtonStyle())
+        .help(isOn ? "Hide lyrics" : "Show lyrics")
     }
 
     private var emptyContent: some View {
@@ -496,6 +535,15 @@ struct MiniPlayerView: View {
                 appState.albumArtWindow.show(url: url)
             }
             .help("Click to enlarge")
+            .contextMenu {
+                if !track.artist.isEmpty, !track.title.isEmpty {
+                    Button("Refresh Art") { appState.refreshAlbumArt() }
+                    Button("Search Alternative Art\u{2026}") {
+                        appState.altArtPickerWindow.show(appState: appState)
+                    }
+                    Button("Ignore This Art") { appState.ignoreCurrentAlbumArt() }
+                }
+            }
         } else {
             artPlaceholder
         }

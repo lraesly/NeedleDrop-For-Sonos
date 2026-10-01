@@ -31,7 +31,26 @@ final class AppState: ObservableObject {
 
     @Published var nowPlaying = NowPlayingState(transportState: .stopped)
     @Published var speakers: [SonosDevice] = []
-    @Published var zones: [SonosZoneGroup] = []
+    @Published var zones: [SonosZoneGroup] = [] {
+        didSet {
+            // Every time we commit a zone list (from any path — initial load,
+            // post-action refresh, background poll), record sightings so the
+            // grace window has a baseline to age against on the next poll.
+            let now = Date()
+            for z in zones { zonesLastSeen[z.id] = now }
+        }
+    }
+    /// Timestamp of the last time each zone (by coordinator UUID) was present
+    /// in a topology fetch. `mergeZonesWithGrace` retains a zone for a few
+    /// seconds when it temporarily disappears from a poll — Sonos occasionally
+    /// returns a transient view mid-regroup that omits a real group, which
+    /// without this would cause the UI to flicker.
+    private var zonesLastSeen: [String: Date] = [:]
+    /// How long a zone may be absent from topology fetches before being
+    /// dropped from the displayed list. Polling runs every 30s, so 45s lets
+    /// one poll miss the zone (transient inconsistency, network glitch)
+    /// without removing it — two consecutive misses do drop it.
+    private static let zoneRemovalGrace: TimeInterval = 45
     @Published var selectedZone: String?
     @Published var volume: Int = 0
     /// Per-speaker volumes for the active group, keyed by speaker UUID.
@@ -142,6 +161,24 @@ final class AppState: ObservableObject {
     /// to non-song content without an AVTransport event arriving.
     private var lastPollStreamContent: String?
 
+    // MARK: - Lyrics
+
+    let lyricsService = LyricsService()
+    /// Lyrics for the currently playing track, or nil if none / not yet fetched.
+    /// Fed by `fetchLyricsForCurrentTrack()` on every track change.
+    @Published var currentLyrics: ParsedLyrics?
+    private var lyricsFetchTask: Task<Void, Never>?
+
+    /// Persisted: whether the mini player's large layout shows lyrics in
+    /// place of album art + track info.
+    var isMiniPlayerLyricsVisible: Bool {
+        get { UserDefaults.standard.bool(forKey: "isMiniPlayerLyricsVisible") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "isMiniPlayerLyricsVisible")
+            Task { @MainActor in self.objectWillChange.send() }
+        }
+    }
+
     // MARK: - Scrobbler
 
     let scrobblerClient = ScrobblerClient()
@@ -155,6 +192,12 @@ final class AppState: ObservableObject {
     /// Debounce task for volume SOAP calls — coalesces rapid slider drags
     /// so we don't flood the speaker with one SOAP call per pixel.
     private var volumeDebounceTask: Task<Void, Never>?
+    /// Task chain that follows a mute write with a read-back. Cancellable so
+    /// rapid mute toggles supersede a pending readback rather than racing.
+    /// Bonded speakers (stereo pairs, surround sets) occasionally accept the
+    /// SOAP write without applying it; the readback corrects the UI when
+    /// that happens.
+    private var muteReadbackTask: Task<Void, Never>?
 
     // MARK: - Mini Player
 
@@ -220,6 +263,7 @@ final class AppState: ObservableObject {
 
     let miniPlayerWindow = MiniPlayerWindow()
     let albumArtWindow = AlbumArtWindow()
+    let altArtPickerWindow = AltArtPickerWindow()
 
     // MARK: - Banner
 
@@ -363,6 +407,11 @@ final class AppState: ObservableObject {
                 self.savedTrackIds.removeAll()
                 self.lovedTrackIds.removeAll()
                 await self.eventHandler.albumArtEnricher.clearCache()
+                // Drop the LRCLIB cache to free memory but keep `currentLyrics`
+                // alive — on wake the same track resumes, so a re-fetch (which
+                // we'd otherwise need to trigger explicitly) is avoided.
+                await self.lyricsService.clearCache()
+                self.lyricsFetchTask?.cancel()
                 ImageCache.shared.clearAll()
             }
         }
@@ -543,6 +592,10 @@ final class AppState: ObservableObject {
                         ? "DJ/break: \(nowPlaying.track?.title ?? "nil")"
                         : "New track: \(newTrackId ?? "nil"), duration: \(nowPlaying.track?.durationSeconds ?? 0)s"
                     log.info("\(desc)")
+
+                    // Fetch synced lyrics for the new track in the background.
+                    // No-op for DJ segments / TV audio (filtered inside).
+                    self.fetchLyricsForCurrentTrack()
                 }
 
                 // Feed scrobble tracker (skip DJ segments — don't scrobble talk/ads)
@@ -696,10 +749,20 @@ final class AppState: ObservableObject {
         guard let firstSpeaker = speakers.first else { return }
 
         Task {
-            // Fetch zone topology and household ID in parallel
+            // Fetch zone topology in the background. Household ID is taken
+            // from Bonjour's TXT record when present (no SOAP round-trip),
+            // and only falls back to SOAP when Bonjour didn't reach this
+            // speaker first. Measurable win on S1 hardware which throttles
+            // aggressively under topology pressure.
             async let groupsTask = zoneManager.getZoneGroups(speakerIP: firstSpeaker.ip)
-            async let householdTask = zoneManager.getHouseholdID(speakerIP: firstSpeaker.ip)
-            let (groups, householdId) = await (groupsTask, householdTask)
+            let householdId: String?
+            if let cached = firstSpeaker.householdID {
+                log.info("Household ID from Bonjour TXT: \(cached) — skipping SOAP fetch")
+                householdId = cached
+            } else {
+                householdId = await zoneManager.getHouseholdID(speakerIP: firstSpeaker.ip)
+            }
+            let groups = await groupsTask
             self.zones = groups
             for g in groups {
                 log.info("Zone topology: \(g.roomName) — coordinator \(g.coordinator.uuid) @ \(g.coordinator.ip), members: \(g.members.map { "\($0.roomName)@\($0.ip)" })")
@@ -1006,7 +1069,18 @@ final class AppState: ObservableObject {
         // Unmute immediately if dragging while muted
         if isMuted && level > 0 {
             isMuted = false
-            Task { await controller.setMuteByIP(ip, muted: false) }
+            muteReadbackTask?.cancel()
+            muteReadbackTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.controller.setMuteByIP(ip, muted: false)
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                if let actual = await self.controller.getMuteByIP(ip),
+                   self.isMuted != actual {
+                    log.debug("Mute readback (auto-unmute): \(self.isMuted) → \(actual)")
+                    self.isMuted = actual
+                }
+            }
         }
 
         // For groups: apply delta proportionally to each speaker
@@ -1022,16 +1096,20 @@ final class AppState: ObservableObject {
 
         // Debounce the SOAP volume call — cancel any pending call and
         // schedule a new one after 50ms. Only the final level gets sent.
+        // The same task then reads the speaker back to catch the bonded-
+        // speaker case where Sonos accepts the SetVolume SOAP but applies
+        // a different actual level (or doesn't apply it at all).
         volumeDebounceTask?.cancel()
 
         if isGroup && !groupSpeakerVolumes.isEmpty {
             // Snapshot the current per-speaker targets for the debounced call
             let targets = groupSpeakerVolumes
+            let allSpeakers = [zone.coordinator] + zone.members
             volumeDebounceTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard !Task.isCancelled, let self else { return }
                 await withTaskGroup(of: Void.self) { group in
-                    for speaker in [zone.coordinator] + zone.members {
+                    for speaker in allSpeakers {
                         if let targetLevel = targets[speaker.uuid] {
                             group.addTask {
                                 await self.controller.setVolumeByIP(speaker.ip, level: targetLevel)
@@ -1039,25 +1117,68 @@ final class AppState: ObservableObject {
                         }
                     }
                 }
+                // Read-after-write reconcile
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                var actualVolumes: [String: Int] = [:]
+                await withTaskGroup(of: (String, Int?).self) { group in
+                    for speaker in allSpeakers {
+                        group.addTask {
+                            let v = await self.controller.getVolumeByIP(speaker.ip)
+                            return (speaker.uuid, v)
+                        }
+                    }
+                    for await (uuid, v) in group {
+                        if let v { actualVolumes[uuid] = v }
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                for (uuid, actual) in actualVolumes
+                where self.groupSpeakerVolumes[uuid] != actual {
+                    self.groupSpeakerVolumes[uuid] = actual
+                }
+                if !actualVolumes.isEmpty {
+                    let avg = actualVolumes.values.reduce(0, +) / actualVolumes.count
+                    if self.volume != avg { self.volume = avg }
+                }
             }
         } else {
             volumeDebounceTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard !Task.isCancelled, let self else { return }
                 await self.controller.setVolumeByIP(ip, level: level)
+                // Read-after-write reconcile
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                if let actual = await self.controller.getVolumeByIP(ip),
+                   self.volume != actual {
+                    log.debug("Volume readback: \(self.volume) → \(actual)")
+                    self.volume = actual
+                }
             }
         }
     }
 
     /// Toggle mute using the Sonos hardware mute (SetMute SOAP action).
     /// This is independent of volume level — muting preserves volume,
-    /// and unmuting restores audio at the same level.
+    /// and unmuting restores audio at the same level. The write is followed
+    /// by a read-back so the UI snaps to whatever the speaker actually
+    /// applied — bonded sets sometimes accept the SOAP without changing.
     func toggleMute() {
         guard let ip = activeCoordinatorIP else { return }
         let newMuted = !isMuted
         isMuted = newMuted
-        Task {
-            await controller.setMuteByIP(ip, muted: newMuted)
+        muteReadbackTask?.cancel()
+        muteReadbackTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.controller.setMuteByIP(ip, muted: newMuted)
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            if let actual = await self.controller.getMuteByIP(ip),
+               self.isMuted != actual {
+                log.debug("Mute readback: \(self.isMuted) → \(actual)")
+                self.isMuted = actual
+            }
         }
     }
 
@@ -1068,10 +1189,19 @@ final class AppState: ObservableObject {
     }
 
     /// Set volume for a specific speaker by UUID (direct SOAP via IP).
+    /// The write is followed by a read-back so the per-speaker slider in
+    /// the UI reflects what the speaker actually applied, not what we
+    /// optimistically asked for.
     func setVolumeForSpeaker(_ uuid: String, level: Int) {
         guard let ip = allTopologySpeakers.first(where: { $0.uuid == uuid })?.ip else { return }
-        Task {
-            await controller.setVolumeByIP(ip, level: level)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.controller.setVolumeByIP(ip, level: level)
+            try? await Task.sleep(for: .milliseconds(200))
+            if let actual = await self.controller.getVolumeByIP(ip),
+               self.groupSpeakerVolumes[uuid] != actual {
+                self.groupSpeakerVolumes[uuid] = actual
+            }
         }
     }
 
@@ -1522,16 +1652,19 @@ final class AppState: ObservableObject {
                     ?? self.discoveryService.cachedSpeakerIP
                 if let ip {
                     let groups = await self.zoneManager.getZoneGroups(speakerIP: ip)
+                    // Merge with grace window so a transiently inconsistent
+                    // topology view doesn't drop real zones from the UI.
+                    let merged = self.mergeZonesWithGrace(groups)
                     // Compare as sets of zone IDs to ignore ordering differences
                     // between SOAP responses. SonosZoneGroup.== already handles
                     // member ordering; this handles zone-level ordering.
-                    let changed = Set(groups.map(\.id)) != Set(self.zones.map(\.id))
-                        || groups.contains(where: { g in
+                    let changed = Set(merged.map(\.id)) != Set(self.zones.map(\.id))
+                        || merged.contains(where: { g in
                             self.zones.first(where: { $0.id == g.id }) != g
                         })
                     if changed {
-                        log.info("Zone topology changed externally — updating (\(groups.count) zone(s))")
-                        self.zones = groups
+                        log.info("Zone topology changed externally — updating (\(merged.count) zone(s))")
+                        self.zones = merged
                     }
                 }
 
@@ -1545,6 +1678,40 @@ final class AppState: ObservableObject {
         log.debug("Stopping zone topology polling")
         zoneTopologyPollingTask?.cancel()
         zoneTopologyPollingTask = nil
+    }
+
+    /// Merge a freshly polled topology with current state, preserving zones
+    /// that have only just disappeared (within the removal grace window).
+    /// Returns the merged list and updates the `zonesLastSeen` map. Caller
+    /// is responsible for committing the result and equality-guarding
+    /// the assignment to `self.zones`.
+    private func mergeZonesWithGrace(_ newGroups: [SonosZoneGroup]) -> [SonosZoneGroup] {
+        let now = Date()
+        let newIDs = Set(newGroups.map(\.id))
+
+        // Record sighting for every group in this poll.
+        for group in newGroups {
+            zonesLastSeen[group.id] = now
+        }
+
+        // Retain previously-known zones missing from this poll if their last
+        // sighting is still within the grace window. Drop entries older than
+        // the grace window so the map doesn't grow unbounded.
+        var retained: [SonosZoneGroup] = []
+        for zone in zones where !newIDs.contains(zone.id) {
+            guard let lastSeen = zonesLastSeen[zone.id] else { continue }
+            let age = now.timeIntervalSince(lastSeen)
+            if age <= Self.zoneRemovalGrace {
+                retained.append(zone)
+            } else {
+                zonesLastSeen.removeValue(forKey: zone.id)
+                log.info("Zone \(zone.roomName) removed (absent for \(Int(age))s, beyond grace)")
+            }
+        }
+
+        // Stable sort by coordinator UUID so the merge order is deterministic
+        // even when newGroups comes back in a different order on consecutive polls.
+        return (newGroups + retained).sorted { $0.coordinator.uuid < $1.coordinator.uuid }
     }
 
     // MARK: - Event Subscription Watchdog
@@ -1599,6 +1766,27 @@ final class AppState: ObservableObject {
                         )
                     }
                     continue
+                }
+
+                // Reconciliation poll (safety net): even with a healthy event
+                // subscription, occasional speaker quirks can cause us to miss
+                // a transport-state transition. A single cheap SOAP every 30s
+                // verifies that what we think matches what the speaker reports;
+                // any mismatch triggers a full state refetch. Skip during
+                // TRANSITIONING because the speaker is mid-flip and a quick
+                // retry would just chase a transient.
+                let soapState = await self.zoneManager.getTransportState(
+                    speakerIP: zone.coordinator.ip
+                )
+                let expected = self.eventHandler.nowPlaying.transportState.rawValue
+                if let soapState,
+                   soapState != "TRANSITIONING",
+                   soapState != expected {
+                    log.info("Watchdog reconcile: speaker reports \(soapState), we have \(expected) — refetching")
+                    await self.eventHandler.fetchInitialState(
+                        speakerIP: zone.coordinator.ip,
+                        zoneName: zone.roomName
+                    )
                 }
 
                 // Check for stale subscription (subscribed but no events arriving).
@@ -1807,6 +1995,109 @@ final class AppState: ObservableObject {
             }
 
         }
+    }
+
+    // MARK: - Lyrics
+
+    /// Refresh `currentLyrics` for the now-playing track. Skips DJ segments,
+    /// TV audio, and anything with empty artist/title. Cancels any in-flight
+    /// fetch so back-to-back track changes don't race.
+    private func fetchLyricsForCurrentTrack() {
+        lyricsFetchTask?.cancel()
+
+        guard let track = nowPlaying.track,
+              !track.isTVAudio,
+              !track.isDJSegment,
+              !track.artist.isEmpty,
+              !track.title.isEmpty else {
+            currentLyrics = nil
+            return
+        }
+
+        // Same track as last fetch — don't re-query LRCLIB.
+        if currentLyrics?.trackId == track.id { return }
+        currentLyrics = nil
+        let trackId = track.id
+        let trackSnapshot = track
+
+        lyricsFetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let lyrics = await self.lyricsService.fetch(for: trackSnapshot)
+            guard !Task.isCancelled,
+                  self.nowPlaying.track?.id == trackId else { return }
+            self.currentLyrics = lyrics
+        }
+    }
+
+    // MARK: - Album Art Overrides
+
+    /// Re-run iTunes art lookup for the current track, discarding any
+    /// negative cache hit so a previously-missed track can be retried.
+    /// Used by the right-click "Refresh art" action.
+    func refreshAlbumArt() {
+        guard let track = nowPlaying.track else { return }
+        log.info("Refreshing album art for \(track.artist) — \(track.title)")
+        Task {
+            await self.eventHandler.albumArtEnricher.forgetCache(
+                artist: track.artist, title: track.title
+            )
+            await self.applyAlbumArtRefresh(for: track)
+        }
+    }
+
+    /// Mark the current track's art URL as ignored (persisted across launches)
+    /// and re-fetch. The enricher will skip the ignored URL when picking from
+    /// iTunes candidates on this and future searches.
+    func ignoreCurrentAlbumArt() {
+        guard let track = nowPlaying.track, let url = track.albumArtURL else { return }
+        ArtOverrideStore.shared.markIgnored(url)
+        log.info("Ignored album art \(url) for \(track.artist) — \(track.title)")
+        Task {
+            await self.eventHandler.albumArtEnricher.forgetCache(
+                artist: track.artist, title: track.title
+            )
+            await self.applyAlbumArtRefresh(for: track)
+        }
+    }
+
+    /// Apply a user-picked alternative art URL: persist it as preferred for
+    /// this (artist, title), update the displayed art immediately. The
+    /// enricher's cached result is left in place — it carries duration
+    /// metadata that's still valid; the preferred URL is substituted on
+    /// every read.
+    func useAlternativeArt(_ url: URL) {
+        guard let track = nowPlaying.track else { return }
+        ArtOverrideStore.shared.setPreferred(
+            artist: track.artist, title: track.title, url: url
+        )
+        log.info("Picked alternative art for \(track.artist) — \(track.title)")
+
+        var updated = track
+        updated.albumArtURL = url
+        nowPlaying.track = updated
+        eventHandler.nowPlaying.track = updated
+    }
+
+    /// Fetch up to 8 alternative-art candidates from iTunes Search for the
+    /// current track. Used by the alt-art picker window.
+    func fetchAlbumArtCandidates() async -> [AltArtCandidate] {
+        guard let track = nowPlaying.track else { return [] }
+        return await eventHandler.albumArtEnricher.searchCandidates(
+            artist: track.artist, title: track.title
+        )
+    }
+
+    /// Re-enrich a track and write the result into `nowPlaying.track` if the
+    /// user hasn't navigated away in the meantime.
+    private func applyAlbumArtRefresh(for track: TrackInfo) async {
+        let enrichment = await eventHandler.albumArtEnricher.searchArt(
+            artist: track.artist, title: track.title
+        )
+        guard let current = nowPlaying.track, current.id == track.id else { return }
+        var updated = current
+        updated.albumArtURL = enrichment?.artURL
+        nowPlaying.track = updated
+        eventHandler.nowPlaying.track = updated
     }
 
     // MARK: - Save Warning
